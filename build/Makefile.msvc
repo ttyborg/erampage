@@ -1,0 +1,157 @@
+# Build Makefile for Microsoft NMake
+!ifdef OVERRIDES
+!include $(OVERRIDES)
+!endif
+
+SRC=src
+!ifndef OBJ
+OBJ=obj.msc
+!endif
+INC=include\ #
+!ifndef CFLAGS
+CFLAGS=/DSUPERBUILD /DPOLYMOST /DUSE_OPENGL /DKSFORBUILD /DPOLYMER
+!endif
+
+o=obj
+res=res
+asm=masm
+
+ENGINELIB=engine.lib
+EDITORLIB=build.lib
+
+DXROOT="U:\SDKs\Microsoft DirectX SDK (April 2007)
+MSSDKROOT="N:\Program Files\Microsoft Visual Studio 9.0\VC
+PLATFORMSDK="N:\Program Files\Microsoft Visual Studio 9.0\VC\PlatformSDK
+# ENETROOT=$(SRC)\enet
+
+# /D these to enable certain features of the port's compile process
+# NOASM     When defined, uses C instead of assembly code
+!ifdef NOASM
+TARGETOPTS=/DNOASM
+!endif
+
+!ifdef DEBUG
+# debugging options
+flags_cl=/Ot /Zi
+flags_link=/DEBUG
+!else
+# release options
+#flags_cl=/Ox
+flags_cl= /O2 /Ox
+flags_link=/RELEASE
+!endif
+
+CC=cl
+AS=ml
+RC=rc
+LINK=link /opt:nowin98 /opt:ref /nologo
+CFLAGS=$(CFLAGS) /nologo /MD /J $(flags_cl) $(TARGETOPTS) /I$(INC) /I$(MSSDKROOT)\include" /I$(PLATFORMSDK)\include" /I$(DXROOT)\include" # /I$(ENETROOT)\include"
+ASFLAGS=/nologo /coff /c
+EXESUFFIX=.exe
+!ifdef DEBUG
+CFLAGS=$(CFLAGS) /DDEBUGGINGAIDS
+!endif
+
+ENGINEOBJS= \
+!ifdef NOASM
+        $(OBJ)\a-c.$o \
+!else
+        $(OBJ)\a.$o \
+!endif
+	$(OBJ)\baselayer.$o \
+	$(OBJ)\cache1d.$o \
+	$(OBJ)\compat.$o \
+	$(OBJ)\crc32.$o \
+	$(OBJ)\defs.$o \
+	$(OBJ)\engine.$o \
+	$(OBJ)\polymost.$o \
+	$(OBJ)\hightile.$o \
+	$(OBJ)\mdsprite.$o \
+	$(OBJ)\textfont.$o \
+	$(OBJ)\smalltextfont.$o \
+	$(OBJ)\glbuild.$o \
+	$(OBJ)\kplib.$o \
+	$(OBJ)\lzf_c.$o \
+	$(OBJ)\lzf_d.$o \
+	$(OBJ)\lzwnew.$o \
+	$(OBJ)\md4.$o \
+	$(OBJ)\mmulti_unstable.$o \
+	$(OBJ)\osd.$o \
+	$(OBJ)\pragmas.$o \
+	$(OBJ)\scriptfile.$o \
+	$(OBJ)\winlayer.$o \
+        $(OBJ)\polymer.$o
+
+EDITOROBJS=$(OBJ)\build.$o \
+	$(OBJ)\startwin.editor.$o \
+	$(OBJ)\config.$o
+
+RENDERTYPE=WIN
+LIBS=$(LIBS) user32.lib gdi32.lib shell32.lib dxguid.lib wsock32.lib comctl32.lib
+CFLAGS=$(CFLAGS) /DRENDERTYPE$(RENDERTYPE)=1 /D "_CRT_SECURE_NO_DEPRECATE" /W2
+
+# RULES
+.SUFFIXES: .masm
+
+{$(SRC)}.masm{$(OBJ)}.$o:
+	$(AS) /c $(ASFLAGS) /Fo$@ $<
+
+{$(SRC)\tmp}.c{$(OBJ)}.$o:
+	$(CC) /c $(CFLAGS) /Fo$@ $<
+
+{$(SRC)\util}.c{$(OBJ)}.$o:
+	$(CC) /c $(CFLAGS) /Fo$@ $<
+
+{$(SRC)\misc}.rc{$(OBJ)}.$(res):
+	$(RC) /i$(INC)\ /fo$@ /r $<
+
+{$(SRC)}.c{$(OBJ)}.$o:
+	$(CC) /c $(CFLAGS) /Fo$@ $<
+
+{$(SRC)}.cpp{$(OBJ)}.$o:
+	$(CC) /c $(CFLAGS) /Fo$@ $<
+
+# TARGETS
+UTILS=kextract$(EXESUFFIX) kgroup$(EXESUFFIX) transpal$(EXESUFFIX) wad2art$(EXESUFFIX) wad2map$(EXESUFFIX)
+ 
+all: $(OBJ)/$(ENGINELIB) $(OBJ)/$(EDITORLIB);
+utils: $(UTILS) ;
+
+enginelib: $(OBJ)\$(ENGINELIB) ;
+$(OBJ)\$(ENGINELIB): $(ENGINEOBJS)
+	lib /out:$@ /nologo $**
+
+editorlib: $(OBJ)\$(EDITORLIB) ;
+$(OBJ)\$(EDITORLIB): $(EDITOROBJS)
+	lib /out:$@ /nologo $**
+
+# the tools
+kextract$(EXESUFFIX): $(OBJ)\kextract.$o $(OBJ)\compat.$o
+	$(LINK) /OUT:$@ /SUBSYSTEM:CONSOLE /LIBPATH:$(DXROOT)\lib\x86" /LIBPATH:$(PLATFORMSDK)\lib" /LIBPATH:$(MSSDKROOT)\lib" $(flags_link) /MAP $** $(LIBS) msvcrt.lib
+	$(MT) -manifest $@.manifest -outputresource:$@
+	
+kgroup$(EXESUFFIX): $(OBJ)\kgroup.$o $(OBJ)\compat.$o
+	$(LINK) /OUT:$@ /SUBSYSTEM:CONSOLE /LIBPATH:$(DXROOT)\lib\x86" /LIBPATH:$(PLATFORMSDK)\lib" /LIBPATH:$(MSSDKROOT)\lib" $(flags_link) /MAP $** $(LIBS) msvcrt.lib
+	$(MT) -manifest $@.manifest -outputresource:$@
+
+transpal$(EXESUFFIX): $(OBJ)\transpal.$o $(OBJ)\pragmas.$o $(OBJ)\compat.$o
+	$(LINK) /OUT:$@ /SUBSYSTEM:CONSOLE /LIBPATH:$(DXROOT)\lib\x86" /LIBPATH:$(PLATFORMSDK)\lib" /LIBPATH:$(MSSDKROOT)\lib" $(flags_link) /MAP $** $(LIBS) msvcrt.lib
+	$(MT) -manifest $@.manifest -outputresource:$@
+
+wad2map$(EXESUFFIX): $(OBJ)\wad2map.$o $(OBJ)\pragmas.$o $(OBJ)\compat.$o
+	$(LINK) /OUT:$@ /SUBSYSTEM:CONSOLE /LIBPATH:$(DXROOT)\lib\x86" /LIBPATH:$(PLATFORMSDK)\lib" /LIBPATH:$(MSSDKROOT)\lib" $(flags_link) /MAP $** $(LIBS) msvcrt.lib
+	$(MT) -manifest $@.manifest -outputresource:$@
+
+wad2art$(EXESUFFIX): $(OBJ)\wad2art.$o $(OBJ)\pragmas.$o $(OBJ)\compat.$o
+	$(LINK) /OUT:$@ /SUBSYSTEM:CONSOLE /LIBPATH:$(DXROOT)\lib\x86" /LIBPATH:$(PLATFORMSDK)\lib" /LIBPATH:$(MSSDKROOT)\lib" $(flags_link) /MAP $** $(LIBS) msvcrt.lib
+	$(MT) -manifest $@.manifest -outputresource:$@
+
+# DEPENDENCIES
+!include Makefile.deps
+
+# PHONIES	
+clean:
+	-del $(ENGINEOBJS) $(EDITOROBJS) $(OBJ)\kextract.$o $(OBJ)\kgroup.$o $(OBJ)\transpal.$o $(OBJ)\wad2map.$o $(OBJ)\wad2art.$o
+veryclean: clean
+	-del /Q $(OBJ)\$(ENGINELIB) $(OBJ)\$(EDITORLIB) $(UTILS) *.map *.manifest *.pdb
+

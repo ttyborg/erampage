@@ -1,0 +1,1840 @@
+//-------------------------------------------------------------------------
+/*
+Copyright (C) 1996, 2003 - 3D Realms Entertainment
+Copyright (C) 2000, 2003 - Matt Saettler (EDuke Enhancements)
+Copyright (C) 2004, 2007 - EDuke32 developers
+Copyright (C) 2009 - dimag0g
+
+This file is part of eRampage port for Redneck Rampage series, derived from EDuke32
+
+eRampage is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License version 2
+as published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+*/
+//-------------------------------------------------------------------------
+
+#include "duke3d.h"
+#include "gamedef.h"
+#include "osd.h"
+
+#define _gamevars_c_
+#include "gamestructures.c"
+
+extern int32_t OSD_errors;
+
+void Gv_RefreshPointers(void);
+extern void G_FreeMapState(int32_t mapnum);
+static void Gv_Free(void) { /* called from Gv_ReadSave() and Gv_ResetVars() */
+    // call this function as many times as needed.
+    int32_t i=(MAXGAMEVARS-1);
+    //  AddLog("Gv_Free");
+    for (; i>=0; i--) {
+        if (aGameVars[i].dwFlags & (GAMEVAR_USER_MASK) && aGameVars[i].val.plValues) {
+            Bfree(aGameVars[i].val.plValues);
+            aGameVars[i].val.plValues=NULL;
+        }
+        aGameVars[i].dwFlags |= GAMEVAR_RESET;
+        if (i >= MAXGAMEARRAYS)
+            continue;
+        if (aGameArrays[i].plValues)
+            Bfree(aGameArrays[i].plValues);
+        aGameArrays[i].plValues=NULL;
+        aGameArrays[i].bReset=1;
+    }
+    g_gameVarCount=g_gameArrayCount=0;
+    hash_init(&gamevarH);
+    hash_init(&arrayH);
+    return;
+}
+
+static void Gv_Clear(void) {
+    // only call this function ONCE...
+    int32_t i=(MAXGAMEVARS-1);
+
+    //AddLog("Gv_Clear");
+
+    for (; i>=0; i--) {
+        if (aGameVars[i].szLabel)
+            Bfree(aGameVars[i].szLabel);
+        aGameVars[i].szLabel=NULL;
+        aGameVars[i].dwFlags=0;
+
+        if (aGameVars[i].dwFlags & (GAMEVAR_USER_MASK) && aGameVars[i].val.plValues) {
+            Bfree(aGameVars[i].val.plValues);
+            aGameVars[i].val.plValues=NULL;
+        }
+        aGameVars[i].val.lValue=0;
+        aGameVars[i].dwFlags |= GAMEVAR_RESET;
+        if (i >= MAXGAMEARRAYS)
+            continue;
+        if (aGameArrays[i].szLabel)
+            Bfree(aGameArrays[i].szLabel);
+        aGameArrays[i].szLabel=NULL;
+
+        if (aGameArrays[i].plValues)
+            Bfree(aGameArrays[i].plValues);
+        aGameArrays[i].plValues=NULL;
+        aGameArrays[i].bReset=1;
+    }
+    g_gameVarCount=g_gameArrayCount=0;
+    hash_init(&gamevarH);
+    hash_init(&arrayH);
+    return;
+}
+
+int32_t Gv_ReadSave(int32_t fil) {
+    int32_t i, j;
+    intptr_t l;
+    char savedstate[MAXVOLUMES*MAXLEVELS];
+
+    Bmemset(&savedstate,0,sizeof(savedstate));
+
+    //     AddLog("Reading gamevars from savegame");
+
+    Gv_Free(); // nuke 'em from orbit, it's the only way to be sure...
+
+    //  Bsprintf(g_szBuf,"CP:%s %d",__FILE__,__LINE__);
+    //  AddLog(g_szBuf);
+
+    if (kdfread(&g_gameVarCount,sizeof(g_gameVarCount),1,fil) != 1) goto corrupt;
+    for (i=0; i<g_gameVarCount; i++) {
+        if (kdfread(&(aGameVars[i]),sizeof(gamevar_t),1,fil) != 1) goto corrupt;
+        aGameVars[i].szLabel=Bcalloc(MAXVARLABEL,sizeof(uint8_t));
+        if (kdfread(aGameVars[i].szLabel,sizeof(uint8_t) * MAXVARLABEL, 1, fil) != 1) goto corrupt;
+        hash_replace(&gamevarH,aGameVars[i].szLabel,i);
+
+        if (aGameVars[i].dwFlags & GAMEVAR_PERPLAYER) {
+            aGameVars[i].val.plValues=Bcalloc(MAXPLAYERS,sizeof(intptr_t));
+            if (kdfread(aGameVars[i].val.plValues,sizeof(intptr_t) * MAXPLAYERS, 1, fil) != 1) goto corrupt;
+        } else if (aGameVars[i].dwFlags & GAMEVAR_PERACTOR) {
+            aGameVars[i].val.plValues=Bcalloc(MAXSPRITES,sizeof(intptr_t));
+            if (kdfread(&aGameVars[i].val.plValues[0],sizeof(intptr_t), MAXSPRITES, fil) != MAXSPRITES) goto corrupt;
+        }
+    }
+    //  Bsprintf(g_szBuf,"CP:%s %d",__FILE__,__LINE__);
+    //  AddLog(g_szBuf);
+
+    Gv_InitWeaponPointers();
+
+    //  Bsprintf(g_szBuf,"CP:%s %d",__FILE__,__LINE__);
+    //  AddLog(g_szBuf);
+    Gv_RefreshPointers();
+
+    if (kdfread(&g_gameArrayCount,sizeof(g_gameArrayCount),1,fil) != 1) goto corrupt;
+    for (i=0; i<g_gameArrayCount; i++) {
+        if (kdfread(&(aGameArrays[i]),sizeof(gamearray_t),1,fil) != 1) goto corrupt;
+        aGameArrays[i].szLabel=Bcalloc(MAXARRAYLABEL,sizeof(uint8_t));
+        if (kdfread(aGameArrays[i].szLabel,sizeof(uint8_t) * MAXARRAYLABEL, 1, fil) != 1) goto corrupt;
+        hash_replace(&arrayH,aGameArrays[i].szLabel,i);
+
+        aGameArrays[i].plValues=Bcalloc(aGameArrays[i].size,sizeof(intptr_t));
+        if (kdfread(aGameArrays[i].plValues,sizeof(intptr_t) * aGameArrays[i].size, 1, fil) < 1) goto corrupt;
+    }
+
+    //  Bsprintf(g_szBuf,"CP:%s %d",__FILE__,__LINE__);
+    //  AddLog(g_szBuf);
+    if (kdfread(apScriptGameEvent,sizeof(apScriptGameEvent),1,fil) != 1) goto corrupt;
+    for (i=0; i<MAXGAMEEVENTS; i++)
+        if (apScriptGameEvent[i]) {
+            l = (intptr_t)apScriptGameEvent[i]+(intptr_t)&script[0];
+            apScriptGameEvent[i] = (intptr_t *)l;
+        }
+
+    //  Bsprintf(g_szBuf,"CP:%s %d",__FILE__,__LINE__);
+    //  AddLog(g_szBuf);
+
+    if (kdfread(&savedstate[0],sizeof(savedstate),1,fil) != 1) goto corrupt;
+
+    for (i=0; i<(MAXVOLUMES*MAXLEVELS); i++) {
+        if (savedstate[i]) {
+            if (MapInfo[i].savedstate == NULL)
+                MapInfo[i].savedstate = Bcalloc(1,sizeof(mapstate_t));
+            if (kdfread(MapInfo[i].savedstate,sizeof(mapstate_t),1,fil) != sizeof(mapstate_t)) goto corrupt;
+            for (j=0; j<g_gameVarCount; j++) {
+                if (aGameVars[j].dwFlags & GAMEVAR_NORESET) continue;
+                if (aGameVars[j].dwFlags & GAMEVAR_PERPLAYER) {
+                    if (!MapInfo[i].savedstate->vars[j])
+                        MapInfo[i].savedstate->vars[j] = Bcalloc(MAXPLAYERS,sizeof(intptr_t));
+                    if (kdfread(&MapInfo[i].savedstate->vars[j][0],sizeof(intptr_t) * MAXPLAYERS, 1, fil) != 1) goto corrupt;
+                } else if (aGameVars[j].dwFlags & GAMEVAR_PERACTOR) {
+                    if (!MapInfo[i].savedstate->vars[j])
+                        MapInfo[i].savedstate->vars[j] = Bcalloc(MAXSPRITES,sizeof(intptr_t));
+                    if (kdfread(&MapInfo[i].savedstate->vars[j][0],sizeof(intptr_t), MAXSPRITES, fil) != MAXSPRITES) goto corrupt;
+                }
+            }
+        } else if (MapInfo[i].savedstate) {
+            G_FreeMapState(i);
+        }
+    }
+
+    if (kdfread(&l,sizeof(l),1,fil) != 1) goto corrupt;
+    if (kdfread(g_szBuf,l,1,fil) != 1) goto corrupt;
+    g_szBuf[l]=0;
+    OSD_Printf("%s\n",g_szBuf);
+
+#if 0
+    {
+        FILE *fp;
+        AddLog("Dumping Vars...");
+        fp=fopen("xxx.txt","w");
+        if (fp) {
+            Gv_DumpValues(fp);
+            fclose(fp);
+        }
+        AddLog("Done Dumping...");
+    }
+#endif
+    return(0);
+corrupt:
+    return(1);
+}
+
+void Gv_WriteSave(FILE *fil) {
+    int32_t i, j;
+    intptr_t l;
+    char savedstate[MAXVOLUMES*MAXLEVELS];
+
+    Bmemset(&savedstate,0,sizeof(savedstate));
+
+    //   AddLog("Saving Game Vars to File");
+    dfwrite(&g_gameVarCount,sizeof(g_gameVarCount),1,fil);
+
+    for (i=0; i<g_gameVarCount; i++) {
+        dfwrite(&(aGameVars[i]),sizeof(gamevar_t),1,fil);
+        dfwrite(aGameVars[i].szLabel,sizeof(uint8_t) * MAXVARLABEL, 1, fil);
+
+        if (aGameVars[i].dwFlags & GAMEVAR_PERPLAYER) {
+            //Bsprintf(g_szBuf,"Writing value array for %s (%d)",aGameVars[i].szLabel,sizeof(int32_t) * MAXPLAYERS);
+            //AddLog(g_szBuf);
+            dfwrite(aGameVars[i].val.plValues,sizeof(intptr_t) * MAXPLAYERS, 1, fil);
+        } else if (aGameVars[i].dwFlags & GAMEVAR_PERACTOR) {
+            //Bsprintf(g_szBuf,"Writing value array for %s (%d)",aGameVars[i].szLabel,sizeof(int32_t) * MAXSPRITES);
+            //AddLog(g_szBuf);
+            dfwrite(&aGameVars[i].val.plValues[0],sizeof(intptr_t), MAXSPRITES, fil);
+        }
+    }
+
+    dfwrite(&g_gameArrayCount,sizeof(g_gameArrayCount),1,fil);
+
+    for (i=0; i<g_gameArrayCount; i++) {
+        dfwrite(&(aGameArrays[i]),sizeof(gamearray_t),1,fil);
+        dfwrite(aGameArrays[i].szLabel,sizeof(uint8_t) * MAXARRAYLABEL, 1, fil);
+        dfwrite(aGameArrays[i].plValues,sizeof(intptr_t) * aGameArrays[i].size, 1, fil);
+    }
+
+    for (i=0; i<MAXGAMEEVENTS; i++)
+        if (apScriptGameEvent[i]) {
+            l = (intptr_t)apScriptGameEvent[i]-(intptr_t)&script[0];
+            apScriptGameEvent[i] = (intptr_t *)l;
+        }
+    dfwrite(apScriptGameEvent,sizeof(apScriptGameEvent),1,fil);
+    for (i=0; i<MAXGAMEEVENTS; i++)
+        if (apScriptGameEvent[i]) {
+            l = (intptr_t)apScriptGameEvent[i]+(intptr_t)&script[0];
+            apScriptGameEvent[i] = (intptr_t *)l;
+        }
+
+    for (i=0; i<(MAXVOLUMES*MAXLEVELS); i++)
+        if (MapInfo[i].savedstate != NULL)
+            savedstate[i] = 1;
+
+    dfwrite(&savedstate[0],sizeof(savedstate),1,fil);
+
+    for (i=0; i<(MAXVOLUMES*MAXLEVELS); i++)
+        if (MapInfo[i].savedstate) {
+            dfwrite(MapInfo[i].savedstate,sizeof(mapstate_t),1,fil);
+            for (j=0; j<g_gameVarCount; j++) {
+                if (aGameVars[j].dwFlags & GAMEVAR_NORESET) continue;
+                if (aGameVars[j].dwFlags & GAMEVAR_PERPLAYER) {
+                    dfwrite(&MapInfo[i].savedstate->vars[j][0],sizeof(intptr_t) * MAXPLAYERS, 1, fil);
+                } else if (aGameVars[j].dwFlags & GAMEVAR_PERACTOR) {
+                    dfwrite(&MapInfo[i].savedstate->vars[j][0],sizeof(intptr_t) * MAXSPRITES, 1, fil);
+                }
+            }
+        }
+
+    Bsprintf(g_szBuf,"EOF: eRampage");
+    l=strlen(g_szBuf);
+    dfwrite(&l,sizeof(l),1,fil);
+    dfwrite(g_szBuf,l,1,fil);
+}
+
+void Gv_DumpValues(void) {
+    int32_t i;
+
+    OSD_Printf("// Current Game Definitions\n\n");
+
+    for (i=0; i<g_gameVarCount; i++) {
+        if (aGameVars[i].dwFlags & (GAMEVAR_SECRET))
+            continue; // do nothing...
+
+        OSD_Printf("gamevar %s ",aGameVars[i].szLabel);
+
+        if (aGameVars[i].dwFlags & (GAMEVAR_INTPTR))
+            OSD_Printf("%d",*((int32_t*)aGameVars[i].val.lValue));
+        else if (aGameVars[i].dwFlags & (GAMEVAR_SHORTPTR))
+            OSD_Printf("%d",*((int16_t*)aGameVars[i].val.lValue));
+        else if (aGameVars[i].dwFlags & (GAMEVAR_CHARPTR))
+            OSD_Printf("%d",*((char*)aGameVars[i].val.lValue));
+        else
+            OSD_Printf("%" PRIdPTR "",aGameVars[i].val.lValue);
+
+        if (aGameVars[i].dwFlags & (GAMEVAR_PERPLAYER))
+            OSD_Printf(" GAMEVAR_PERPLAYER");
+        else if (aGameVars[i].dwFlags & (GAMEVAR_PERACTOR))
+            OSD_Printf(" GAMEVAR_PERACTOR");
+        else
+            OSD_Printf(" %d",aGameVars[i].dwFlags/* & (GAMEVAR_USER_MASK)*/);
+
+        OSD_Printf(" // ");
+        if (aGameVars[i].dwFlags & (GAMEVAR_SYSTEM))
+            OSD_Printf(" (system)");
+        if (aGameVars[i].dwFlags & (GAMEVAR_INTPTR|GAMEVAR_SHORTPTR|GAMEVAR_CHARPTR))
+            OSD_Printf(" (pointer)");
+        if (aGameVars[i].dwFlags & (GAMEVAR_READONLY))
+            OSD_Printf(" (read only)");
+        if (aGameVars[i].dwFlags & (GAMEVAR_SPECIAL))
+            OSD_Printf(" (special)");
+        OSD_Printf("\n");
+    }
+    OSD_Printf("\n// end of game definitions\n");
+}
+
+void Gv_ResetVars(void) { /* this is called during a new game and nowhere else */
+    int32_t i;
+
+    Gv_Free();
+    OSD_errors=0;
+
+    for (i=0; i<MAXGAMEVARS; i++) {
+        if (aGameVars[i].szLabel != NULL && aGameVars[i].dwFlags & GAMEVAR_RESET)
+            Gv_NewVar(aGameVars[i].szLabel,aGameVars[i].lDefault,aGameVars[i].dwFlags);
+    }
+
+    for (i=0; i<MAXGAMEARRAYS; i++) {
+        if (aGameArrays[i].szLabel != NULL && aGameArrays[i].bReset)
+            Gv_NewArray(aGameArrays[i].szLabel,aGameArrays[i].size);
+    }
+}
+
+int32_t Gv_NewArray(const char *pszLabel, int32_t asize) {
+    int32_t i;
+
+    if (g_gameArrayCount >= MAXGAMEARRAYS) {
+        g_numCompilerErrors++;
+        C_ReportError(-1);
+        initprintf("%s:%d: error: too many arrays!\n",g_szScriptFileName,g_lineNumber);
+        return 0;
+    }
+
+    if (Bstrlen(pszLabel) > (MAXARRAYLABEL-1)) {
+        g_numCompilerErrors++;
+        C_ReportError(-1);
+        initprintf("%s:%d: error: array name `%s' exceeds limit of %d characters.\n",g_szScriptFileName,g_lineNumber,pszLabel, MAXARRAYLABEL);
+        return 0;
+    }
+    i = hash_find(&arrayH,pszLabel);
+    if (i >=0 && !aGameArrays[i].bReset) {
+        // found it it's a duplicate in error
+        g_numCompilerWarnings++;
+        C_ReportError(WARNING_DUPLICATEDEFINITION);
+        return 0;
+    }
+
+    i = g_gameArrayCount;
+
+    if (aGameArrays[i].szLabel == NULL)
+        aGameArrays[i].szLabel=Bcalloc(MAXVARLABEL,sizeof(uint8_t));
+    if (aGameArrays[i].szLabel != pszLabel)
+        Bstrcpy(aGameArrays[i].szLabel,pszLabel);
+    aGameArrays[i].plValues=Bcalloc(asize,sizeof(intptr_t));
+    aGameArrays[i].size=asize;
+    aGameArrays[i].bReset=0;
+    g_gameArrayCount++;
+    hash_replace(&arrayH,aGameArrays[i].szLabel,i);
+    return 1;
+}
+
+int32_t Gv_NewVar(const char *pszLabel, int32_t lValue, uint32_t dwFlags) {
+    int32_t i, j;
+
+    //Bsprintf(g_szBuf,"Gv_NewVar(%s, %d, %X)",pszLabel, lValue, dwFlags);
+    //AddLog(g_szBuf);
+
+    if (g_gameVarCount >= MAXGAMEVARS) {
+        g_numCompilerErrors++;
+        C_ReportError(-1);
+        initprintf("%s:%d: error: too many gamevars!\n",g_szScriptFileName,g_lineNumber);
+        return 0;
+    }
+
+    if (Bstrlen(pszLabel) > (MAXVARLABEL-1)) {
+        g_numCompilerErrors++;
+        C_ReportError(-1);
+        initprintf("%s:%d: error: variable name `%s' exceeds limit of %d characters.\n",g_szScriptFileName,g_lineNumber,pszLabel, MAXVARLABEL);
+        return 0;
+    }
+
+    i = hash_find(&gamevarH,pszLabel);
+
+    if (i >= 0 && !(aGameVars[i].dwFlags & GAMEVAR_RESET)) {
+        // found it...
+        if (aGameVars[i].dwFlags & (GAMEVAR_INTPTR|GAMEVAR_SHORTPTR|GAMEVAR_CHARPTR)) {
+            //  			   warning++;
+            //  			   initprintf("%s:%d: warning: Internal gamevar '%s' cannot be redefined.\n",g_szScriptFileName,g_lineNumber,label+(g_numLabels<<6));
+            C_ReportError(-1);
+            initprintf("%s:%d: warning: cannot redefine internal gamevar `%s'.\n",g_szScriptFileName,g_lineNumber,label+(g_numLabels<<6));
+            return 0;
+        } else if (!(aGameVars[i].dwFlags & GAMEVAR_DEFAULT) && !(aGameVars[i].dwFlags & GAMEVAR_SYSTEM)) {
+            // it's a duplicate in error
+            g_numCompilerWarnings++;
+            C_ReportError(WARNING_DUPLICATEDEFINITION);
+            return 0;
+        }
+    }
+
+    if (i == -1)
+        i = g_gameVarCount;
+
+    // Set values
+    if ((aGameVars[i].dwFlags & GAMEVAR_SYSTEM) == 0) {
+        if (aGameVars[i].szLabel == NULL)
+            aGameVars[i].szLabel=Bcalloc(MAXVARLABEL,sizeof(uint8_t));
+        if (aGameVars[i].szLabel != pszLabel)
+            Bstrcpy(aGameVars[i].szLabel,pszLabel);
+        aGameVars[i].dwFlags=dwFlags;
+
+        if (aGameVars[i].dwFlags & GAMEVAR_USER_MASK) {
+            // only free if not system
+            if (aGameVars[i].val.plValues)
+                Bfree(aGameVars[i].val.plValues);
+            aGameVars[i].val.plValues=NULL;
+        }
+    }
+
+    // if existing is system, they only get to change default value....
+    aGameVars[i].lDefault = lValue;
+    aGameVars[i].dwFlags &= ~GAMEVAR_RESET;
+
+    if (i == g_gameVarCount) {
+        // we're adding a new one.
+        hash_add(&gamevarH, aGameVars[i].szLabel, g_gameVarCount++);
+    }
+
+    if (aGameVars[i].dwFlags & GAMEVAR_PERPLAYER) {
+        if (!aGameVars[i].val.plValues)
+            aGameVars[i].val.plValues=Bcalloc(MAXPLAYERS,sizeof(intptr_t));
+        for (j=MAXPLAYERS-1; j>=0; j--)
+            aGameVars[i].val.plValues[j]=lValue;
+    } else if (aGameVars[i].dwFlags & GAMEVAR_PERACTOR) {
+        if (!aGameVars[i].val.plValues)
+            aGameVars[i].val.plValues=Bcalloc(MAXSPRITES,sizeof(intptr_t));
+        for (j=MAXSPRITES-1; j>=0; j--)
+            aGameVars[i].val.plValues[j]=lValue;
+    } else aGameVars[i].val.lValue = lValue;
+
+    return 1;
+}
+
+void A_ResetVars(int32_t iActor) {
+    int32_t i=(MAXGAMEVARS-1);
+    for (; i>=0; i--)
+        if ((aGameVars[i].dwFlags & GAMEVAR_PERACTOR) && !(aGameVars[i].dwFlags & GAMEVAR_NODEFAULT))
+            aGameVars[i].val.plValues[iActor]=aGameVars[i].lDefault;
+}
+
+static int32_t Gv_GetVarIndex(const char *szGameLabel) {
+    int32_t i = hash_find(&gamevarH,szGameLabel);
+    if (i == -1) {
+        OSD_Printf(OSD_ERROR "Gv_GetVarDataPtr(): INTERNAL ERROR: couldn't find gamevar %s!\n",szGameLabel);
+        return 0;
+    }
+    return i;
+}
+
+int32_t __fastcall Gv_GetVar(int32_t id, int32_t iActor, int32_t iPlayer) {
+    if (id == MAXGAMEVARS)
+        return(*insptr++);
+
+    if (id == g_iThisActorID)
+        return iActor;
+
+    {
+        int32_t negateResult = 0;
+
+        if (id >= g_gameVarCount || id < 0) {
+            if (id&(MAXGAMEVARS<<2)) { // array
+                int32_t index=Gv_GetVar(*insptr++,iActor,iPlayer);
+
+                if (id&(MAXGAMEVARS<<1)) // negative array access
+                    negateResult = 1;
+
+                id &= (MAXGAMEVARS-1);// ~((MAXGAMEVARS<<2)|(MAXGAMEVARS<<1));
+
+                if (index >= aGameArrays[id].size || index < 0) {
+                    OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index (%s[%d])\n",g_errorLineNum,keyw[g_tw],aGameArrays[id].szLabel,index);
+                    return -1;
+                }
+                if (negateResult) return (-aGameArrays[id].plValues[index]);
+                return (aGameArrays[id].plValues[index]);
+            }
+
+            if (id&(MAXGAMEVARS<<3)) { // struct shortcut vars
+                int32_t index=Gv_GetVar(*insptr++, iActor, iPlayer), label;
+
+                if (id == g_iActorVarID) {
+                    if (index >= MAXSPRITES || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    label = Gv_GetVar(*insptr++, index, iPlayer);
+//                    OSD_Printf("actorvar returned %d\n",label);
+                } else label = *insptr++;
+
+                if (id&(MAXGAMEVARS<<1)) // negative array access
+                    negateResult = 1;
+
+                id &= (MAXGAMEVARS-1); //~((MAXGAMEVARS<<3)|(MAXGAMEVARS<<1));
+
+                if (id == g_iSpriteVarID) {
+                    int32_t parm2 = 0;
+
+                    /*OSD_Printf("%d %d %d\n",__LINE__,index,label);*/
+                    if (ActorLabels[label].flags & LABEL_HASPARM2)
+                        parm2 = Gv_GetVar(*insptr++, iActor, iPlayer);
+
+                    if (index >= MAXSPRITES || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return (-X_AccessSpriteX(index, label, parm2));
+                    return (X_AccessSpriteX(index, label, parm2));
+                } else if (id == g_iPlayerVarID) {
+                    int32_t parm2 = 0;
+
+                    if (PlayerLabels[label].flags & LABEL_HASPARM2)
+                        parm2 = Gv_GetVar(*insptr++, iActor, iPlayer);
+
+                    if (index == vm.g_i) index = vm.g_p;
+                    if (index >= MAXPLAYERS || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return (-X_AccessPlayerX(index, label, parm2));
+                    return (X_AccessPlayerX(index, label, parm2));
+                } else if (id == g_iActorVarID) {
+                    if (index >= MAXSPRITES || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return -label;
+                    return label;
+                } else if (id == g_iSectorVarID) {
+                    if (index == vm.g_i) index = sprite[vm.g_i].sectnum;
+                    if (index >= MAXSECTORS || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return (-X_AccessSectorX(index, label));
+                    return (X_AccessSectorX(index, label));
+                } else if (id == g_iWallVarID) {
+                    if (index >= MAXWALLS || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return (-X_AccessWallX(index, label));
+                    return (X_AccessWallX(index, label));
+                }
+            }
+
+            if ((id&(MAXGAMEVARS<<1)) == 0) {
+                OSD_Printf(CON_ERROR "Gv_GetVar(): invalid gamevar ID (%d)\n",g_errorLineNum,keyw[g_tw],id);
+                return -1;
+            }
+
+            negateResult = 1;
+            id &= ~(MAXGAMEVARS<<1);
+        }
+
+        switch (aGameVars[id].dwFlags & (GAMEVAR_USER_MASK|GAMEVAR_INTPTR|
+                                         GAMEVAR_SHORTPTR|GAMEVAR_CHARPTR)) {
+        default:
+            if (negateResult) return (-aGameVars[id].val.lValue);
+            return (aGameVars[id].val.lValue);
+        case GAMEVAR_PERPLAYER:
+            if (iPlayer < 0 || iPlayer >= MAXPLAYERS) {
+                OSD_Printf(CON_ERROR "Gv_GetVar(): invalid player ID (%d)\n",g_errorLineNum,keyw[g_tw],iPlayer);
+                return -1;
+            }
+            if (negateResult) return (-aGameVars[id].val.plValues[iPlayer]);
+            return (aGameVars[id].val.plValues[iPlayer]);
+        case GAMEVAR_PERACTOR:
+            if (iActor < 0 || iActor >= MAXSPRITES) {
+                OSD_Printf(CON_ERROR "Gv_GetVar(): invalid sprite ID (%d)\n",g_errorLineNum,keyw[g_tw],iActor);
+                return -1;
+            }
+            if (negateResult) return (-aGameVars[id].val.plValues[iActor]);
+            return (aGameVars[id].val.plValues[iActor]);
+        case GAMEVAR_INTPTR:
+            if (negateResult) return (-(*((int32_t*)aGameVars[id].val.lValue)));
+            return ((*((int32_t*)aGameVars[id].val.lValue)));
+        case GAMEVAR_SHORTPTR:
+            if (negateResult) return (-(*((int16_t*)aGameVars[id].val.lValue)));
+            return ((*((int16_t*)aGameVars[id].val.lValue)));
+        case GAMEVAR_CHARPTR:
+            if (negateResult) return (-(*((char*)aGameVars[id].val.lValue)));
+            return ((*((char*)aGameVars[id].val.lValue)));
+        }
+
+    }
+}
+
+void __fastcall Gv_SetVar(int32_t id, int32_t lValue, int32_t iActor, int32_t iPlayer) {
+    if (id<0 || id >= g_gameVarCount) {
+        OSD_Printf(CON_ERROR "Gv_SetVar(): tried to set invalid gamevar ID (%d) from sprite %d (%d), player %d\n",g_errorLineNum,keyw[g_tw],id,vm.g_i,sprite[vm.g_i].picnum,vm.g_p);
+        return;
+    }
+    //Bsprintf(g_szBuf,"SGVI: %d ('%s') to %d for %d %d",id,aGameVars[id].szLabel,lValue,iActor,iPlayer);
+    //AddLog(g_szBuf);
+
+    switch (aGameVars[id].dwFlags & (GAMEVAR_USER_MASK|GAMEVAR_INTPTR|
+                                     GAMEVAR_SHORTPTR|GAMEVAR_CHARPTR)) {
+    default:
+        aGameVars[id].val.lValue=lValue;
+        return;
+    case GAMEVAR_PERPLAYER:
+        if (iPlayer < 0 || iPlayer > MAXPLAYERS-1) {
+            OSD_Printf(CON_ERROR "Gv_SetVar(): invalid player (%d) for per-player gamevar %s from sprite %d, player %d\n",g_errorLineNum,keyw[g_tw],iPlayer,aGameVars[id].szLabel,vm.g_i,vm.g_p);
+            return;
+        }
+        // for the current player
+        aGameVars[id].val.plValues[iPlayer]=lValue;
+        return;
+    case GAMEVAR_PERACTOR:
+        if (iActor < 0 || iActor > MAXSPRITES-1) {
+            OSD_Printf(CON_ERROR "Gv_SetVar(): invalid sprite (%d) for per-actor gamevar %s from sprite %d (%d), player %d\n",g_errorLineNum,keyw[g_tw],iActor,aGameVars[id].szLabel,vm.g_i,sprite[vm.g_i].picnum,vm.g_p);
+            return;
+        }
+        // for the current actor
+        aGameVars[id].val.plValues[iActor]=lValue;
+        return;
+    case GAMEVAR_INTPTR:
+        *((int32_t*)aGameVars[id].val.lValue)=(int32_t)lValue;
+        return;
+    case GAMEVAR_SHORTPTR:
+        *((int16_t*)aGameVars[id].val.lValue)=(int16_t)lValue;
+        return;
+    case GAMEVAR_CHARPTR:
+        *((char*)aGameVars[id].val.lValue)=(uint8_t)lValue;
+        return;
+    }
+}
+
+int32_t __fastcall Gv_GetVarX(int32_t id) {
+    if (id == MAXGAMEVARS)
+        return(*insptr++);
+
+    if (id == g_iThisActorID)
+        return vm.g_i;
+
+    {
+        int32_t negateResult = 0;
+
+        if (id >= g_gameVarCount || id < 0) {
+            if (id&(MAXGAMEVARS<<2)) { // array
+                int32_t index=Gv_GetVarX(*insptr++);
+
+                if (id&(MAXGAMEVARS<<1)) // negative array access
+                    negateResult = 1;
+
+                id &= (MAXGAMEVARS-1);// ~((MAXGAMEVARS<<2)|(MAXGAMEVARS<<1));
+
+                if (index >= aGameArrays[id].size || index < 0) {
+                    OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index (%s[%d])\n",g_errorLineNum,keyw[g_tw],aGameArrays[id].szLabel,index);
+                    return -1;
+                }
+                if (negateResult) return (-aGameArrays[id].plValues[index]);
+                return (aGameArrays[id].plValues[index]);
+            }
+
+            if (id&(MAXGAMEVARS<<3)) { // struct shortcut vars
+                int32_t index=Gv_GetVarX(*insptr++), label;
+
+                if (id&(MAXGAMEVARS<<1)) // negative array access
+                    negateResult = 1;
+
+                id &= (MAXGAMEVARS-1);// ~((MAXGAMEVARS<<3)|(MAXGAMEVARS<<1));
+
+                if (id == g_iActorVarID) {
+                    if (index >= MAXSPRITES || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    label = Gv_GetVar(*insptr++, index, vm.g_p);
+                } else label = *insptr++;
+
+                if (id == g_iSpriteVarID) {
+                    int32_t parm2 = 0;
+
+                    /*OSD_Printf("%d %d %d\n",__LINE__,index,label);*/
+                    if (ActorLabels[label].flags & LABEL_HASPARM2)
+                        parm2 = Gv_GetVarX(*insptr++);
+                    if (index >= MAXSPRITES || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+
+                    if (negateResult) return (-X_AccessSpriteX(index, label, parm2));
+                    return (X_AccessSpriteX(index, label, parm2));
+                } else if (id == g_iPlayerVarID) {
+                    int32_t parm2 = 0;
+
+                    if (PlayerLabels[label].flags & LABEL_HASPARM2)
+                        parm2 = Gv_GetVarX(*insptr++);
+
+                    if (index == vm.g_i) index = vm.g_p;
+                    if (index >= MAXPLAYERS || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return (-X_AccessPlayerX(index, label, parm2));
+                    return (X_AccessPlayerX(index, label, parm2));
+                } else if (id == g_iActorVarID) {
+                    if (index >= MAXSPRITES || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return -label;
+                    return label;
+                } else if (id == g_iSectorVarID) {
+                    if (index == vm.g_i) index = sprite[vm.g_i].sectnum;
+                    if (index >= MAXSECTORS || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return (-X_AccessSectorX(index, label));
+                    return (X_AccessSectorX(index, label));
+                } else if (id == g_iWallVarID) {
+                    if (index >= MAXWALLS || index < 0) {
+                        OSD_Printf(CON_ERROR "Gv_GetVar(): invalid array index\n",g_errorLineNum,keyw[g_tw]);
+                        return -1;
+                    }
+                    if (negateResult) return (-X_AccessWallX(index, label));
+                    return (X_AccessWallX(index, label));
+                }
+            }
+
+            if ((id&(MAXGAMEVARS<<1)) == 0) {
+                OSD_Printf(CON_ERROR "Gv_GetVar(): invalid gamevar ID (%d)\n",g_errorLineNum,keyw[g_tw],id);
+                return -1;
+            }
+
+            negateResult = 1;
+            id &= ~(MAXGAMEVARS<<1);
+        }
+
+        switch (aGameVars[id].dwFlags & (GAMEVAR_USER_MASK|GAMEVAR_INTPTR|
+                                         GAMEVAR_SHORTPTR|GAMEVAR_CHARPTR)) {
+        default:
+            if (negateResult) return (-aGameVars[id].val.lValue);
+            return (aGameVars[id].val.lValue);
+        case GAMEVAR_PERPLAYER:
+            if (negateResult) return (-aGameVars[id].val.plValues[vm.g_p]);
+            return (aGameVars[id].val.plValues[vm.g_p]);
+        case GAMEVAR_PERACTOR:
+            if (negateResult) return (-aGameVars[id].val.plValues[vm.g_i]);
+            return (aGameVars[id].val.plValues[vm.g_i]);
+        case GAMEVAR_INTPTR:
+            if (negateResult) return (-(*((int32_t*)aGameVars[id].val.lValue)));
+            return (*((int32_t*)aGameVars[id].val.lValue));
+        case GAMEVAR_SHORTPTR:
+            if (negateResult) return (-(*((int16_t*)aGameVars[id].val.lValue)));
+            return (*((int16_t*)aGameVars[id].val.lValue));
+        case GAMEVAR_CHARPTR:
+            if (negateResult) return (-(*((char*)aGameVars[id].val.lValue)));
+            return (*((char*)aGameVars[id].val.lValue));
+        }
+    }
+}
+
+void __fastcall Gv_SetVarX(int32_t id, int32_t lValue) {
+    switch (aGameVars[id].dwFlags & (GAMEVAR_USER_MASK|GAMEVAR_INTPTR|
+                                     GAMEVAR_SHORTPTR|GAMEVAR_CHARPTR)) {
+    default:
+        aGameVars[id].val.lValue=lValue;
+        return;
+    case GAMEVAR_PERPLAYER:
+        aGameVars[id].val.plValues[vm.g_p]=lValue;
+        return;
+    case GAMEVAR_PERACTOR:
+        aGameVars[id].val.plValues[vm.g_i]=lValue;
+        return;
+    case GAMEVAR_INTPTR:
+        *((int32_t*)aGameVars[id].val.lValue)=(int32_t)lValue;
+        return;
+    case GAMEVAR_SHORTPTR:
+        *((int16_t*)aGameVars[id].val.lValue)=(int16_t)lValue;
+        return;
+    case GAMEVAR_CHARPTR:
+        *((char*)aGameVars[id].val.lValue)=(uint8_t)lValue;
+        return;
+    }
+}
+
+int32_t Gv_GetVarByLabel(const char *szGameLabel, int32_t lDefault, int32_t iActor, int32_t iPlayer) {
+    int32_t i = hash_find(&gamevarH,szGameLabel);
+
+    if (i < 0)
+        return lDefault;
+
+    return Gv_GetVar(i, iActor, iPlayer);
+}
+
+static intptr_t *Gv_GetVarDataPtr(const char *szGameLabel) {
+    int32_t i = hash_find(&gamevarH,szGameLabel);
+
+    if (i < 0)
+        return NULL;
+
+    if (aGameVars[i].dwFlags & (GAMEVAR_PERACTOR | GAMEVAR_PERPLAYER)) {
+        if (!aGameVars[i].val.plValues)
+            OSD_Printf(CON_ERROR "Gv_GetVarDataPtr(): INTERNAL ERROR: NULL array !!!\n",g_errorLineNum,keyw[g_tw]);
+        return aGameVars[i].val.plValues;
+    }
+
+    return &(aGameVars[i].val.lValue);
+}
+
+void Gv_ResetSystemDefaults(void) {
+    // call many times...
+
+    int32_t i,j;
+    char aszBuf[64];
+
+    //AddLog("ResetWeaponDefaults");
+
+    for (j=MAXPLAYERS-1; j>=0; j--) {
+        for (i=MAX_WEAPONS-1; i>=0; i--) {
+            Bsprintf(aszBuf,"WEAPON%d_CLIP",i);
+            aplWeaponClip[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_RELOAD",i);
+            aplWeaponReload[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",i);
+            aplWeaponFireDelay[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",i);
+            aplWeaponTotalTime[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",i);
+            aplWeaponHoldDelay[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_FLAGS",i);
+            aplWeaponFlags[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_SHOOTS",i);
+            aplWeaponShoots[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",i);
+            aplWeaponSpawnTime[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_SPAWN",i);
+            aplWeaponSpawn[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",i);
+            aplWeaponShotsPerBurst[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",i);
+            aplWeaponWorksLike[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",i);
+            aplWeaponInitialSound[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",i);
+            aplWeaponFireSound[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",i);
+            aplWeaponSound2Time[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",i);
+            aplWeaponSound2Sound[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",i);
+            aplWeaponReloadSound1[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",i);
+            aplWeaponReloadSound2[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",i);
+            aplWeaponSelectSound[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+            Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",i);
+            aplWeaponFlashColor[i][j]=Gv_GetVarByLabel(aszBuf,0, -1, j);
+        }
+    }
+
+    g_iReturnVarID=Gv_GetVarIndex("RETURN");
+    g_iWeaponVarID=Gv_GetVarIndex("WEAPON");
+    g_iWorksLikeVarID=Gv_GetVarIndex("WORKSLIKE");
+    g_iZRangeVarID=Gv_GetVarIndex("ZRANGE");
+    g_iAngRangeVarID=Gv_GetVarIndex("ANGRANGE");
+    g_iAimAngleVarID=Gv_GetVarIndex("AUTOAIMANGLE");
+    g_iLoTagID=Gv_GetVarIndex("LOTAG");
+    g_iHiTagID=Gv_GetVarIndex("HITAG");
+    g_iTextureID=Gv_GetVarIndex("TEXTURE");
+    g_iThisActorID=Gv_GetVarIndex("THISACTOR");
+
+    g_iSpriteVarID=Gv_GetVarIndex("sprite");
+    g_iSectorVarID=Gv_GetVarIndex("sector");
+    g_iWallVarID=Gv_GetVarIndex("wall");
+    g_iPlayerVarID=Gv_GetVarIndex("player");
+    g_iActorVarID=Gv_GetVarIndex("actorvar");
+
+    Bmemcpy(&ProjectileData,&DefaultProjectileData,sizeof(ProjectileData));
+
+    //AddLog("EOF:ResetWeaponDefaults");
+}
+
+static void Gv_AddSystemVars(void) {
+    // only call ONCE
+    char aszBuf[64];
+
+    //AddLog("Gv_AddSystemVars");
+
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, CROWBAR_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 7, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 14, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_NOVISIBLE | WEAPON_RANDOMRESTART | WEAPON_AUTOMATIC, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, KNEE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",CROWBAR_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, CASUL_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 6, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 30, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 5, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 20, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, NAM?WEAPON_HOLSTER_CLEARS_CLIP:0 | WEAPON_RELOAD_TIMING, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, SHOTSPARK1, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 2, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, SHELL, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, PISTOL_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",CASUL_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, SHOTGUN_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 13, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 4, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 30, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_CHECKATRELOAD, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, SHOTGUN, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 24, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, SHOTGUNSHELL, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 10, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, SHOTGUN_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 15, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, SHOTGUN_COCK, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, SHOTGUN_COCK, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",SHOTGUN_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, RIFLE_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 12, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_AUTOMATIC | WEAPON_FIREEVERYTHIRD | WEAPON_AMMOPERSHOT | WEAPON_SPAWNTYPE3 | WEAPON_RESET, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, CHAINGUN, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 1, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, SHELL, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, CHAINGUN_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",RIFLE_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, CROSSBOW_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 4, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 20, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, RPG, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",CROSSBOW_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, DYNAMITE_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 30, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 6, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 19, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 12, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_THROWIT, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, HEAVYHBOMB, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",DYNAMITE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, ALIENARMGUN_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 10, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 20, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_GLOWS, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, ALIENARMGUN, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, ALIENARMGUN_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, ALIENARMGUN_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",ALIENARMGUN_WEAPON);
+    Gv_NewVar(aszBuf, 128+(255<<8)+(128<<16), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, TEATGUN_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 6, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 5, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_FIREEVERYOTHER | WEAPON_AMMOPERSHOT, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, RPG, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 2, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",TEATGUN_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, POWDERKEG_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 16, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 16, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 7, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_STANDSTILL | WEAPON_CHECKATRELOAD, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, HANDHOLDINGLASER, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",POWDERKEG_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, THROWSAW_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 10, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 5, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 20, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_RESET, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, CIRCLESAW, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, BUZSAW_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, BUZSAW_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",THROWSAW_WEAPON);
+    Gv_NewVar(aszBuf, 128+(128<<8)+(255<<16), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    /////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, HANDREMOTE_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 10, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 2, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 10, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_BOMB_TRIGGER | WEAPON_NOVISIBLE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",HANDREMOTE_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    ///////////////////////////////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, BUZSAW_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 2, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_GLOWS, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, KNEE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, BUZSAW_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, BUZSAW_FIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",BUZSAW_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    ///////////////////////////////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, BOWLINGBALL_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 40, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_GLOWS, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, BOWLINGBALL, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, NAM?0:EXPANDERSHOOT, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",BOWLINGBALL_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    ///////////////////////////////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, MOTORCYCLE_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, NAM?30:5, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_GLOWS, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, CHAINGUN, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",MOTORCYCLE_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    ///////////////////////////////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, BOAT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 4, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 20, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, RPG2, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, MORTAR, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",BOAT_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    ///////////////////////////////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, SLINGBLADE_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 15, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, KNEE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, SLINGBL, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",SLINGBLADE_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    ///////////////////////////////////////////////////////
+    Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, CHICKEN_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_CLIP",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOAD",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 3, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 20, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLAGS",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, WEAPON_GLOWS, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOOTS",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, RPG, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SPAWN",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, EJECT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, INSERT_CLIP, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, SELECT_WEAPON, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",CHICKEN_WEAPON);
+    Gv_NewVar(aszBuf, 255+(95<<8), GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    Gv_NewVar("GRENADE_LIFETIME", NAM_GRENADE_LIFETIME, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Gv_NewVar("GRENADE_LIFETIME_VAR", NAM_GRENADE_LIFETIME_VAR, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    Gv_NewVar("STICKYBOMB_LIFETIME", NAM_GRENADE_LIFETIME, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Gv_NewVar("STICKYBOMB_LIFETIME_VAR", NAM_GRENADE_LIFETIME_VAR, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    Gv_NewVar("TRIPBOMB_CONTROL", TRIPBOMB_TRIPWIRE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Gv_NewVar("PIPEBOMB_CONTROL", NAM?PIPEBOMB_TIMER:PIPEBOMB_REMOTE, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+
+    Gv_NewVar("RESPAWN_MONSTERS", (intptr_t)&ud.respawn_monsters,GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("RESPAWN_ITEMS",(intptr_t)&ud.respawn_items, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("RESPAWN_INVENTORY",(intptr_t)&ud.respawn_inventory, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("MONSTERS_OFF",(intptr_t)&ud.monsters_off, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("MARKER",(intptr_t)&ud.marker, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("FFIRE",(intptr_t)&ud.ffire, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("LEVEL",(intptr_t)&ud.level_number, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_READONLY);
+    Gv_NewVar("VOLUME",(intptr_t)&ud.volume_number, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_READONLY);
+
+    Gv_NewVar("COOP",(intptr_t)&ud.coop, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("MULTIMODE",(intptr_t)&ud.multimode, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+
+    Gv_NewVar("WEAPON", 0, GAMEVAR_PERPLAYER | GAMEVAR_READONLY | GAMEVAR_SYSTEM);
+    Gv_NewVar("WORKSLIKE", 0, GAMEVAR_PERPLAYER | GAMEVAR_READONLY | GAMEVAR_SYSTEM);
+    Gv_NewVar("RETURN", 0, GAMEVAR_SYSTEM);
+    Gv_NewVar("ZRANGE", 4, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Gv_NewVar("ANGRANGE", 18, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Gv_NewVar("AUTOAIMANGLE", 0, GAMEVAR_PERPLAYER | GAMEVAR_SYSTEM);
+    Gv_NewVar("LOTAG", 0, GAMEVAR_SYSTEM);
+    Gv_NewVar("HITAG", 0, GAMEVAR_SYSTEM);
+    Gv_NewVar("TEXTURE", 0, GAMEVAR_SYSTEM);
+    Gv_NewVar("THISACTOR", 0, GAMEVAR_READONLY | GAMEVAR_SYSTEM);
+
+    // special vars for struct access
+    Gv_NewVar("sprite", -1, GAMEVAR_READONLY | GAMEVAR_SYSTEM | GAMEVAR_SPECIAL);
+    Gv_NewVar("sector", -1, GAMEVAR_READONLY | GAMEVAR_SYSTEM | GAMEVAR_SPECIAL);
+    Gv_NewVar("wall", -1, GAMEVAR_READONLY | GAMEVAR_SYSTEM | GAMEVAR_SPECIAL);
+    Gv_NewVar("player", -1, GAMEVAR_READONLY | GAMEVAR_SYSTEM | GAMEVAR_SPECIAL);
+    Gv_NewVar("actorvar", -1, GAMEVAR_READONLY | GAMEVAR_SYSTEM | GAMEVAR_SPECIAL);
+
+    Gv_NewVar("myconnectindex", (intptr_t)&myconnectindex, GAMEVAR_READONLY | GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("screenpeek", (intptr_t)&screenpeek, GAMEVAR_READONLY | GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("currentweapon",(intptr_t)&g_currentweapon, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("gs",(intptr_t)&g_gs, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("looking_arc",(intptr_t)&g_looking_arc, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("gun_pos",(intptr_t)&g_gun_pos, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("weapon_xoffset",(intptr_t)&g_weapon_xoffset, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("weaponcount",(intptr_t)&g_kb, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("looking_angSR1",(intptr_t)&g_looking_angSR1, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("xdim",(intptr_t)&xdim, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("ydim",(intptr_t)&ydim, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("windowx1",(intptr_t)&windowx1, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("windowx2",(intptr_t)&windowx2, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("windowy1",(intptr_t)&windowy1, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("windowy2",(intptr_t)&windowy2, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("totalclock",(intptr_t)&totalclock, GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("lastvisinc",(intptr_t)&lastvisinc, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("numsectors",(intptr_t)&numsectors, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_READONLY);
+
+    Gv_NewVar("current_menu",(intptr_t)&g_currentMenu, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_READONLY);
+    Gv_NewVar("numplayers",(intptr_t)&numplayers, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_READONLY);
+    Gv_NewVar("viewingrange",(intptr_t)&viewingrange, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("yxaspect",(intptr_t)&yxaspect, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("gravitationalconstant",(intptr_t)&g_spriteGravity, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("gametype_flags",(intptr_t)&GametypeFlags[ud.coop], GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+    Gv_NewVar("framerate",(intptr_t)&g_currentFrameRate, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_READONLY | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("CLIPMASK0", CLIPMASK0, GAMEVAR_SYSTEM|GAMEVAR_READONLY);
+    Gv_NewVar("CLIPMASK1", CLIPMASK1, GAMEVAR_SYSTEM|GAMEVAR_READONLY);
+
+    Gv_NewVar("camerax",(intptr_t)&ud.camerax, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("cameray",(intptr_t)&ud.cameray, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("cameraz",(intptr_t)&ud.cameraz, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("cameraang",(intptr_t)&ud.cameraang, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("camerahoriz",(intptr_t)&ud.camerahoriz, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("camerasect",(intptr_t)&ud.camerasect, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("cameradist",(intptr_t)&g_cameraDistance, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("cameraclock",(intptr_t)&g_cameraClock, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+
+    Gv_NewVar("myx",(intptr_t)&my.x, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myy",(intptr_t)&my.y, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myz",(intptr_t)&my.z, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("omyx",(intptr_t)&omy.x, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("omyy",(intptr_t)&omy.y, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("omyz",(intptr_t)&omy.z, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myvelx",(intptr_t)&myvel.x, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myvely",(intptr_t)&myvel.y, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myvelz",(intptr_t)&myvel.z, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+
+    Gv_NewVar("myhoriz",(intptr_t)&myhoriz, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myhorizoff",(intptr_t)&myhorizoff, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("omyhoriz",(intptr_t)&omyhoriz, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("omyhorizoff",(intptr_t)&omyhorizoff, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myang",(intptr_t)&myang, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("omyang",(intptr_t)&omyang, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("mycursectnum",(intptr_t)&mycursectnum, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myjumpingcounter",(intptr_t)&myjumpingcounter, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_SYNCCHECK);
+
+    Gv_NewVar("myjumpingtoggle",(intptr_t)&myjumpingtoggle, GAMEVAR_SYSTEM | GAMEVAR_CHARPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myonground",(intptr_t)&myonground, GAMEVAR_SYSTEM | GAMEVAR_CHARPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myhardlanding",(intptr_t)&myhardlanding, GAMEVAR_SYSTEM | GAMEVAR_CHARPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("myreturntocenter",(intptr_t)&myreturntocenter, GAMEVAR_SYSTEM | GAMEVAR_CHARPTR | GAMEVAR_SYNCCHECK);
+
+    Gv_NewVar("display_mirror",(intptr_t)&display_mirror, GAMEVAR_SYSTEM | GAMEVAR_CHARPTR | GAMEVAR_SYNCCHECK);
+    Gv_NewVar("randomseed",(intptr_t)&randomseed, GAMEVAR_SYSTEM | GAMEVAR_INTPTR);
+
+    Gv_NewVar("NUMWALLS",(intptr_t)&numwalls, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_READONLY);
+    Gv_NewVar("NUMSECTORS",(intptr_t)&numsectors, GAMEVAR_SYSTEM | GAMEVAR_SHORTPTR | GAMEVAR_READONLY);
+
+    Gv_NewVar("lastsavepos",(intptr_t)&g_lastSaveSlot, GAMEVAR_SYSTEM | GAMEVAR_INTPTR | GAMEVAR_SYNCCHECK);
+#ifdef POLYMOST
+    Gv_NewVar("rendmode",(intptr_t)&rendmode, GAMEVAR_READONLY | GAMEVAR_INTPTR | GAMEVAR_SYSTEM | GAMEVAR_SYNCCHECK);
+#endif
+}
+
+void Gv_Init(void) {
+    // only call ONCE
+
+    //  initprintf("Initializing game variables\n");
+    //AddLog("Gv_Init");
+
+    Gv_Clear();
+    Gv_AddSystemVars();
+    Gv_InitWeaponPointers();
+    Gv_ResetSystemDefaults();
+}
+
+void Gv_InitWeaponPointers(void) {
+    int32_t i;
+    char aszBuf[64];
+    // called from game Init AND when level is loaded...
+
+    //AddLog("Gv_InitWeaponPointers");
+
+    for (i=(MAX_WEAPONS-1); i>=0; i--) {
+        Bsprintf(aszBuf,"WEAPON%d_CLIP",i);
+        aplWeaponClip[i]=Gv_GetVarDataPtr(aszBuf);
+        if (!aplWeaponClip[i]) {
+            initprintf("ERROR: NULL weapon!  WTF?!\n");
+            // exit(0);
+            G_Shutdown();
+        }
+        Bsprintf(aszBuf,"WEAPON%d_RELOAD",i);
+        aplWeaponReload[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_FIREDELAY",i);
+        aplWeaponFireDelay[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_TOTALTIME",i);
+        aplWeaponTotalTime[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_HOLDDELAY",i);
+        aplWeaponHoldDelay[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_FLAGS",i);
+        aplWeaponFlags[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_SHOOTS",i);
+        aplWeaponShoots[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_SPAWNTIME",i);
+        aplWeaponSpawnTime[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_SPAWN",i);
+        aplWeaponSpawn[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_SHOTSPERBURST",i);
+        aplWeaponShotsPerBurst[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_WORKSLIKE",i);
+        aplWeaponWorksLike[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_INITIALSOUND",i);
+        aplWeaponInitialSound[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_FIRESOUND",i);
+        aplWeaponFireSound[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_SOUND2TIME",i);
+        aplWeaponSound2Time[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_SOUND2SOUND",i);
+        aplWeaponSound2Sound[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND1",i);
+        aplWeaponReloadSound1[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_RELOADSOUND2",i);
+        aplWeaponReloadSound2[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_SELECTSOUND",i);
+        aplWeaponSelectSound[i]=Gv_GetVarDataPtr(aszBuf);
+        Bsprintf(aszBuf,"WEAPON%d_FLASHCOLOR",i);
+        aplWeaponFlashColor[i]=Gv_GetVarDataPtr(aszBuf);
+    }
+}
+
+void Gv_RefreshPointers(void) {
+    aGameVars[Gv_GetVarIndex("RESPAWN_MONSTERS")].val.lValue = (intptr_t)&ud.respawn_monsters;
+    aGameVars[Gv_GetVarIndex("RESPAWN_ITEMS")].val.lValue = (intptr_t)&ud.respawn_items;
+    aGameVars[Gv_GetVarIndex("RESPAWN_INVENTORY")].val.lValue = (intptr_t)&ud.respawn_inventory;
+    aGameVars[Gv_GetVarIndex("MONSTERS_OFF")].val.lValue = (intptr_t)&ud.monsters_off;
+    aGameVars[Gv_GetVarIndex("MARKER")].val.lValue = (intptr_t)&ud.marker;
+    aGameVars[Gv_GetVarIndex("FFIRE")].val.lValue = (intptr_t)&ud.ffire;
+    aGameVars[Gv_GetVarIndex("LEVEL")].val.lValue = (intptr_t)&ud.level_number;
+    aGameVars[Gv_GetVarIndex("VOLUME")].val.lValue = (intptr_t)&ud.volume_number;
+
+    aGameVars[Gv_GetVarIndex("COOP")].val.lValue = (intptr_t)&ud.coop;
+    aGameVars[Gv_GetVarIndex("MULTIMODE")].val.lValue = (intptr_t)&ud.multimode;
+
+    aGameVars[Gv_GetVarIndex("myconnectindex")].val.lValue = (intptr_t)&myconnectindex;
+    aGameVars[Gv_GetVarIndex("screenpeek")].val.lValue = (intptr_t)&screenpeek;
+    aGameVars[Gv_GetVarIndex("currentweapon")].val.lValue = (intptr_t)&g_currentweapon;
+    aGameVars[Gv_GetVarIndex("gs")].val.lValue = (intptr_t)&g_gs;
+    aGameVars[Gv_GetVarIndex("looking_arc")].val.lValue = (intptr_t)&g_looking_arc;
+    aGameVars[Gv_GetVarIndex("gun_pos")].val.lValue = (intptr_t)&g_gun_pos;
+    aGameVars[Gv_GetVarIndex("weapon_xoffset")].val.lValue = (intptr_t)&g_weapon_xoffset;
+    aGameVars[Gv_GetVarIndex("weaponcount")].val.lValue = (intptr_t)&g_kb;
+    aGameVars[Gv_GetVarIndex("looking_angSR1")].val.lValue = (intptr_t)&g_looking_angSR1;
+    aGameVars[Gv_GetVarIndex("xdim")].val.lValue = (intptr_t)&xdim;
+    aGameVars[Gv_GetVarIndex("ydim")].val.lValue = (intptr_t)&ydim;
+    aGameVars[Gv_GetVarIndex("windowx1")].val.lValue = (intptr_t)&windowx1;
+    aGameVars[Gv_GetVarIndex("windowx2")].val.lValue = (intptr_t)&windowx2;
+    aGameVars[Gv_GetVarIndex("windowy1")].val.lValue = (intptr_t)&windowy1;
+    aGameVars[Gv_GetVarIndex("windowy2")].val.lValue = (intptr_t)&windowy2;
+    aGameVars[Gv_GetVarIndex("totalclock")].val.lValue = (intptr_t)&totalclock;
+    aGameVars[Gv_GetVarIndex("lastvisinc")].val.lValue = (intptr_t)&lastvisinc;
+    aGameVars[Gv_GetVarIndex("numsectors")].val.lValue = (intptr_t)&numsectors;
+    aGameVars[Gv_GetVarIndex("numplayers")].val.lValue = (intptr_t)&numplayers;
+    aGameVars[Gv_GetVarIndex("current_menu")].val.lValue = (intptr_t)&g_currentMenu;
+    aGameVars[Gv_GetVarIndex("viewingrange")].val.lValue = (intptr_t)&viewingrange;
+    aGameVars[Gv_GetVarIndex("yxaspect")].val.lValue = (intptr_t)&yxaspect;
+    aGameVars[Gv_GetVarIndex("gravitationalconstant")].val.lValue = (intptr_t)&g_spriteGravity;
+    aGameVars[Gv_GetVarIndex("gametype_flags")].val.lValue = (intptr_t)&GametypeFlags[ud.coop];
+    aGameVars[Gv_GetVarIndex("framerate")].val.lValue = (intptr_t)&g_currentFrameRate;
+
+    aGameVars[Gv_GetVarIndex("camerax")].val.lValue = (intptr_t)&ud.camerax;
+    aGameVars[Gv_GetVarIndex("cameray")].val.lValue = (intptr_t)&ud.cameray;
+    aGameVars[Gv_GetVarIndex("cameraz")].val.lValue = (intptr_t)&ud.cameraz;
+    aGameVars[Gv_GetVarIndex("cameraang")].val.lValue = (intptr_t)&ud.cameraang;
+    aGameVars[Gv_GetVarIndex("camerahoriz")].val.lValue = (intptr_t)&ud.camerahoriz;
+    aGameVars[Gv_GetVarIndex("camerasect")].val.lValue = (intptr_t)&ud.camerasect;
+    aGameVars[Gv_GetVarIndex("cameradist")].val.lValue = (intptr_t)&g_cameraDistance;
+    aGameVars[Gv_GetVarIndex("cameraclock")].val.lValue = (intptr_t)&g_cameraClock;
+
+    aGameVars[Gv_GetVarIndex("myx")].val.lValue = (intptr_t)&my.x;
+    aGameVars[Gv_GetVarIndex("myy")].val.lValue = (intptr_t)&my.y;
+    aGameVars[Gv_GetVarIndex("myz")].val.lValue = (intptr_t)&my.z;
+    aGameVars[Gv_GetVarIndex("omyx")].val.lValue = (intptr_t)&omy.x;
+    aGameVars[Gv_GetVarIndex("omyy")].val.lValue = (intptr_t)&omy.y;
+    aGameVars[Gv_GetVarIndex("omyz")].val.lValue = (intptr_t)&omy.z;
+    aGameVars[Gv_GetVarIndex("myvelx")].val.lValue = (intptr_t)&myvel.x;
+    aGameVars[Gv_GetVarIndex("myvely")].val.lValue = (intptr_t)&myvel.y;
+    aGameVars[Gv_GetVarIndex("myvelz")].val.lValue = (intptr_t)&myvel.z;
+
+    aGameVars[Gv_GetVarIndex("myhoriz")].val.lValue = (intptr_t)&myhoriz;
+    aGameVars[Gv_GetVarIndex("myhorizoff")].val.lValue = (intptr_t)&myhorizoff;
+    aGameVars[Gv_GetVarIndex("omyhoriz")].val.lValue = (intptr_t)&omyhoriz;
+    aGameVars[Gv_GetVarIndex("omyhorizoff")].val.lValue = (intptr_t)&omyhorizoff;
+    aGameVars[Gv_GetVarIndex("myang")].val.lValue = (intptr_t)&myang;
+    aGameVars[Gv_GetVarIndex("omyang")].val.lValue = (intptr_t)&omyang;
+    aGameVars[Gv_GetVarIndex("mycursectnum")].val.lValue = (intptr_t)&mycursectnum;
+    aGameVars[Gv_GetVarIndex("myjumpingcounter")].val.lValue = (intptr_t)&myjumpingcounter;
+
+    aGameVars[Gv_GetVarIndex("myjumpingtoggle")].val.lValue = (intptr_t)&myjumpingtoggle;
+    aGameVars[Gv_GetVarIndex("myonground")].val.lValue = (intptr_t)&myonground;
+    aGameVars[Gv_GetVarIndex("myhardlanding")].val.lValue = (intptr_t)&myhardlanding;
+    aGameVars[Gv_GetVarIndex("myreturntocenter")].val.lValue = (intptr_t)&myreturntocenter;
+
+    aGameVars[Gv_GetVarIndex("display_mirror")].val.lValue = (intptr_t)&display_mirror;
+    aGameVars[Gv_GetVarIndex("randomseed")].val.lValue = (intptr_t)&randomseed;
+
+    aGameVars[Gv_GetVarIndex("NUMWALLS")].val.lValue = (intptr_t)&numwalls;
+    aGameVars[Gv_GetVarIndex("NUMSECTORS")].val.lValue = (intptr_t)&numsectors;
+
+    aGameVars[Gv_GetVarIndex("lastsavepos")].val.lValue = (intptr_t)&g_lastSaveSlot;
+#ifdef POLYMOST
+    aGameVars[Gv_GetVarIndex("rendmode")].val.lValue = (intptr_t)&rendmode;
+#endif
+}
