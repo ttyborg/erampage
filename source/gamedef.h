@@ -894,6 +894,43 @@ enum ScriptKeywords_t {
     CON_GETARRAYSIZE,       // 343
     CON_SAVENN,             // 344
     CON_COPY,               // 345
+    CON_IFONMOTO,
+    CON_IFONBOAT,        //347
+    CON_IFMOTOFAST,        //348
+    CON_IFHITTRUCK,        //349
+    CON_IFTIPCOW,        //350
+    CON_IFSOUNDID,        //351
+    CON_IFSOUNDDIST,        //352
+    CON_IFACTORHEALTHL,        //353
+    CON_FEATHERS,        //354
+    CON_ISEAT,        //355
+    CON_NEWPIC,        //356
+    CON_SLAPPLAYER,        //357
+    CON_SMACKBUBBA,        //358
+    CON_STRAFERIGHT,        //359
+    CON_STRAFELEFT,        //360
+    CON_MOTOLOOPSND,        //361
+    CON_GARYBANJO,        //362
+    CON_SOUNDTAGONCE,        //363
+    CON_FAKEBUBBA,        //364
+    CON_TEARITUP,        //365
+    CON_LARRYBIRD,        //366
+    CON_MAMAQUAKE,        //367
+    CON_SMACKSPRITE,        //368
+    CON_IFCOOP,    //369
+    CON_IFONMUD,    //370
+    CON_IFSIZEDOWN,    //371
+    CON_DESTROYIT,    //372
+    CON_MAMASPAWN,    //373
+    CON_MAMATRIGGER,    //374
+    CON_MAMAEND,    //375
+    CON_IFFINDNEWSPOT,    //376   HUNTIN
+    CON_IFPUPWIND,    //377
+    CON_LEAVEDROPPINGS,    //378
+    CON_LEAVETRAX,    //379
+    CON_DEPLOYBIAS,    //380
+    CON_IFACTORHEALTHG, //381
+    CON_RNDMOVE, //382
     CON_END
 };
 #endif

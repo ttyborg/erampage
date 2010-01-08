@@ -540,7 +540,7 @@ static void X_Move(void) {
                     g_player[vm.g_p].ps->posxv = mulscale(g_player[vm.g_p].ps->posxv,g_player[vm.g_p].ps->runspeed-0x2000,16);
                     g_player[vm.g_p].ps->posyv = mulscale(g_player[vm.g_p].ps->posyv,g_player[vm.g_p].ps->runspeed-0x2000,16);
                 }
-            } else { /*if (vm.g_sp->picnum != DRONE && vm.g_sp->picnum != SHARK && vm.g_sp->picnum != COMMANDER)*/
+            } else { /* if (vm.g_sp->picnum != DRONE && vm.g_sp->picnum != SHARK && vm.g_sp->picnum != COMMANDER)*/
                 if (ActorExtra[vm.g_i].bposz != vm.g_sp->z || (ud.multimode < 2 && ud.player_skill < 2)) {
                     if ((vm.g_t[0]&1) || g_player[vm.g_p].ps->actorsqu == vm.g_i) return;
                     else daxvel <<= 1;
@@ -589,6 +589,7 @@ static inline void X_DoConditional(int32_t condition) {
 
 static int32_t X_DoExecute(void) {
     int32_t tw = *insptr;
+    int tmpi;
 
     if (vm.g_killitFlag + vm.g_killitFlag) return 1;
 
@@ -1088,6 +1089,86 @@ static int32_t X_DoExecute(void) {
         vm.g_killitFlag = 1;
         break;
 
+    case CON_SMACKBUBBA:
+        insptr++;
+        sector[sprite[g_player[vm.g_p].ps->i].sectnum].lotag = 65535;
+        break;
+
+    case CON_STRAFERIGHT:
+        insptr++;
+        break;
+
+    case CON_STRAFELEFT:
+        insptr++;
+        break;
+
+    case CON_MOTOLOOPSND:
+        insptr++;
+        A_PlaySound(188,vm.g_i);
+        break;
+
+    case CON_GARYBANJO:
+        insptr++;
+        A_PlaySound(262,vm.g_i); //? :(
+        break;
+
+    case CON_SOUNDTAGONCE:
+        insptr++;
+        break;
+
+    case CON_FAKEBUBBA:
+        insptr++;
+        break;
+
+    case CON_TEARITUP:
+        insptr++;
+        break;
+
+    case CON_LARRYBIRD:
+        insptr++;
+        break;
+
+    case CON_MAMAQUAKE:
+        insptr++;
+        break;
+
+    case CON_SMACKSPRITE:
+        insptr++;
+        break;
+
+    case CON_RNDMOVE:
+        insptr++;
+        break;
+
+    case CON_DESTROYIT:
+        insptr++;
+        break;
+
+    case CON_MAMASPAWN:
+        insptr++;
+        break;
+
+    case CON_MAMATRIGGER:
+        insptr++;
+        break;
+
+    case CON_MAMAEND:
+        insptr++;
+        sector[sprite[g_player[vm.g_p].ps->i].sectnum].lotag = 65535;
+        break;
+
+    case CON_LEAVEDROPPINGS:
+        insptr++;
+        break;
+
+    case CON_LEAVETRAX:
+        insptr++;
+        break;
+
+    case CON_DEPLOYBIAS:
+        insptr++;
+        break;
+
     case CON_ADDWEAPON:
         insptr++;
         if ((*insptr<0 ||*insptr>=MAX_WEAPONS) && g_scriptSanityChecks) {
@@ -1128,6 +1209,7 @@ static int32_t X_DoExecute(void) {
         ud.eog = 1;
         break;
 
+    case CON_ISEAT:
     case CON_ADDPHEALTH:
         insptr++;
 
@@ -2374,6 +2456,13 @@ static int32_t X_DoExecute(void) {
         insptr++;
         break;
 
+    case CON_FEATHERS:
+        insptr++;
+        if (vm.g_sp->sectnum >= 0 && vm.g_sp->sectnum < MAXSECTORS)
+            for (tmpi = 0; tmpi < *insptr; tmpi++) A_Spawn(vm.g_i, 1310);
+        insptr++;
+        break;
+
     case CON_IFWASWEAPON:
         insptr++;
         X_DoConditional(ActorExtra[vm.g_i].picnum == *insptr);
@@ -2444,6 +2533,12 @@ static int32_t X_DoExecute(void) {
         insptr++;
         vm.g_sp->cstat = (int16_t) *insptr++;
         break;
+
+    case CON_NEWPIC:
+        insptr++;
+        vm.g_sp->picnum = (int16_t) *insptr++;
+        break;
+
     case CON_SAVENN:
     case CON_SAVE:
         insptr++;
@@ -2576,6 +2671,47 @@ static int32_t X_DoExecute(void) {
 
     case CON_IFINWATER:
         X_DoConditional(sector[vm.g_sp->sectnum].lotag == 2);
+        break;
+
+    case CON_IFONMOTO:
+        X_DoConditional(g_player[vm.g_p].ps->curr_weapon == MOTORCYCLE_WEAPON);
+        break;
+
+    case CON_IFONBOAT:
+        X_DoConditional(g_player[vm.g_p].ps->curr_weapon == BOAT_WEAPON);
+        break;
+
+    case CON_IFMOTOFAST:
+        X_DoConditional(g_player[vm.g_p].ps->curr_weapon == MOTORCYCLE_WEAPON || g_player[vm.g_p].ps->curr_weapon == BOAT_WEAPON);
+        break;
+
+    case CON_IFHITTRUCK:
+        X_DoConditional(0);
+        break;
+
+    case CON_IFTIPCOW:
+        X_DoConditional(0);
+        break;
+
+
+    case CON_IFCOOP:
+        X_DoConditional(0);
+        break;
+
+    case CON_IFONMUD:
+        X_DoConditional(0);
+        break;
+
+    case CON_IFSIZEDOWN:
+        X_DoConditional(0);
+        break;
+
+    case CON_IFFINDNEWSPOT:
+        X_DoConditional(0);
+        break;
+
+    case CON_IFPUPWIND:
+        X_DoConditional(0);
         break;
 
     case CON_IFCOUNT:
@@ -3984,6 +4120,16 @@ static int32_t X_DoExecute(void) {
     case CON_IFPHEALTHL:
         insptr++;
         X_DoConditional(sprite[g_player[vm.g_p].ps->i].extra < *insptr);
+        break;
+
+    case CON_IFACTORHEALTHL:
+        insptr++;
+        X_DoConditional(vm.g_sp->extra < *insptr);
+        break;
+
+    case CON_IFACTORHEALTHG:
+        insptr++;
+        X_DoConditional(vm.g_sp->extra > *insptr);
         break;
 
     case CON_IFPINVENTORY:

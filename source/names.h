@@ -81,7 +81,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MOONSKY2 81
 #define MOONSKY3 82
 #define MOONSKY4 83
-#define BIGORBIT1 2577
+#define BIGORBIT1 84 //? these won't work yet, bigorbit would actually kill the player (2577)
 #define BIGORBIT2 2974
 #define BIGORBIT3 7262
 #define BIGORBIT4 8239
@@ -89,7 +89,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define LA 89
 #define REDSKY1 3810
 #define REDSKY2 7265
-#define ATOMICHEALTH 100
+#define ATOMICHEALTH 5595
 #define TECHLIGHT2 120
 #define TECHLIGHTBUST2 121
 #define TECHLIGHT4 122
@@ -325,7 +325,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MASKWALL15 1024
 #define BOTTLE7 1025
 #define HORSEONSIDE 1026
-#define GLASSPIECES 1031
+#define GLASSPIECES 1256
 #define HORSELITE 1034
 #define DONUTS 1045
 #define NEON6 1046

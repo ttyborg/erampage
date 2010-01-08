@@ -10019,11 +10019,11 @@ void app_main(int32_t argc,const char **argv) {
         if ((homedir = Bgethomedir())) {
             Bsnprintf(cwd,sizeof(cwd),"%s/"
 #if defined(_WIN32)
-                      "EDuke32 Settings"
+                      "eRampage Settings"
 #elif defined(__APPLE__)
-                      "Library/Application Support/EDuke32"
+                      "Library/Application Support/eRampage"
 #else
-                      ".eduke32"
+                      ".erampage"
 #endif
                       ,homedir);
             asperr = addsearchpath(cwd);
@@ -10057,7 +10057,7 @@ void app_main(int32_t argc,const char **argv) {
     */
 
     i = CONFIG_ReadSetup();
-    if (getenv("DUKE3DGRP")) duke3dgrp = getenv("DUKE3DGRP");
+    if (getenv("REDNECKGRP")) duke3dgrp = getenv("REDNECKGRP");
 
 #ifdef _WIN32
     /*

@@ -485,6 +485,43 @@ const char *keyw[] = {
     "getarraysize",             // 343
     "savenn",                   // 344
     "copy",                     // 345
+    "ifonmoto",
+    "ifonboat",        //347
+    "ifmotofast",        //348
+    "ifhittruck",        //349
+    "iftipcow",        //350
+    "ifsoundid",        //351
+    "ifsounddist",        //352
+    "ifactorhealthl",        //353
+    "feathers",        //354
+    "iseat",        //355
+    "newpic",        //356
+    "slapplayer",        //357
+    "smackbubba",        //358
+    "straferight",        //359
+    "strafeleft",        //360
+    "motoloopsnd",        //361
+    "garybanjo",        //362
+    "soundtagonce",        //363
+    "fakebubba",        //364
+    "tearitup",        //365
+    "larrybird",        //366
+    "mamaquake",        //367
+    "smacksprite",        //368
+    "ifcoop",    //369
+    "ifonmud",    //370
+    "ifsizedown",    //371
+    "destroyit",    //372
+    "mamaspawn",    //373
+    "mamatrigger",    //374
+    "mamaend",    //375
+    "iffindnewspot",    //376   huntin
+    "ifpupwind",    //377
+    "leavedroppings",    //378
+    "leavetrax",    //379
+    "deploybias",    //380
+    "ifactorhealthg",        //381
+    "rndmove",
     "<null>"
 };
 
@@ -2729,6 +2766,9 @@ static int32_t C_ParseCommand(void) {
     case CON_LOTSOFGLASS:
     case CON_SAVENN:
     case CON_SAVE:
+    case CON_FEATHERS:
+    case CON_ISEAT:
+    case CON_NEWPIC:
         if (!C_CheckEventSync(g_currentEvent)) {
             C_ReportError(WARNING_EVENTSYNC);
             g_numCompilerWarnings++;
@@ -4333,7 +4373,11 @@ repeatcase:
     case CON_IFACTION:
     case CON_IFMOVE:
     case CON_IFP:
-    case CON_IFPINVENTORY: {
+    case CON_IFPINVENTORY:
+    case CON_IFSOUNDID:
+    case CON_IFSOUNDDIST:
+    case CON_IFACTORHEALTHL:
+    case CON_IFACTORHEALTHG: {
         intptr_t offset;
         intptr_t lastScriptPtr = (g_scriptPtr-&script[0]-1);
 
@@ -4419,7 +4463,17 @@ repeatcase:
     case CON_IFNOTMOVING:
     case CON_IFAWAYFROMWALL:
     case CON_IFCANSEETARGET:
-    case CON_IFNOSOUNDS: {
+    case CON_IFNOSOUNDS:
+    case CON_IFONMOTO:
+    case CON_IFONBOAT:
+    case CON_IFMOTOFAST:
+    case CON_IFHITTRUCK:
+    case CON_IFTIPCOW:
+    case CON_IFCOOP:
+    case CON_IFONMUD:
+    case CON_IFSIZEDOWN:
+    case CON_IFFINDNEWSPOT:
+    case CON_IFPUPWIND: {
         intptr_t offset;
         intptr_t lastScriptPtr = (g_scriptPtr-&script[0]-1);
 
@@ -5169,7 +5223,7 @@ repeatcase:
         CAMERASDESTRUCTABLE
         NUMBUZSAWBOUNCES
         BUZSAWRHURTOWNER
-        QSIZE
+                                QSIZE
         DILDOBLASERMODE
         MAXMOTOAMMO
         MAXBOATAMMO
