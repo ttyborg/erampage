@@ -1049,21 +1049,24 @@ static void G_MoveFallers(void) {
                     A_SetSprite(i,CLIPMASK0);
                 }
 
-                if (G_CheckForSpaceFloor(s->sectnum))
+
+                /*if (G_CheckForSpaceFloor(s->sectnum))
                     x = 0;
-                else {
+                else
+                {
                     if (G_CheckForSpaceCeiling(s->sectnum))
                         x = g_spriteGravity/6;
                     else
                         x = g_spriteGravity;
-                }
-
+                }*/
+                x = g_spriteGravity;
                 if (s->z < (sector[sect].floorz-FOURSLEIGHT)) {
                     s->zvel += x;
                     if (s->zvel > 6144)
                         s->zvel = 6144;
                     s->z += s->zvel;
                 }
+
                 if ((sector[sect].floorz-s->z) < (16<<8)) {
                     j = 1+(krand()&7);
                     for (x=0; x<j; x++) RANDOMSCRAP;

@@ -4197,21 +4197,29 @@ void P_ProcessInput(int32_t snum) {
             if (!TEST_SYNC_KEY(sb_snum, SK_JUMP) && !TEST_SYNC_KEY(sb_snum, SK_CROUCH) && p->on_ground && (sector[psect].floorstat&2) && p->posz >= (fz-(i<<8)-(16<<8)))
                 p->posz = fz-(i<<8);
             else {
+
+                int32_t playerGravity = g_spriteGravity+80,
+                                        playerMaxFallTime = 62;
+                if (p->curr_weapon == MOTORCYCLE_WEAPON ||p->curr_weapon == BOAT_WEAPON) {
+                    playerGravity /= 3,
+                                     playerMaxFallTime *= 3;
+                }
+
                 p->on_ground = 0;
-                p->poszv += (g_spriteGravity+80); // (TICSPERFRAME<<6);
+                p->poszv += (playerGravity); // (TICSPERFRAME<<6);
                 if (p->poszv >= (4096+2048)) p->poszv = (4096+2048);
                 if (p->poszv > 2400 && p->falling_counter < 255) {
                     p->falling_counter++;
-                    if (p->falling_counter == 38)
+                    if (p->falling_counter == playerMaxFallTime/2)
                         p->scream_voice = A_PlaySound(DUKE_SCREAM,pi);
                 }
 
                 if ((p->posz+p->poszv) >= (fz-(i<<8)) && p->cursectnum >= 0)   // hit the ground
                     if (sector[p->cursectnum].lotag != 1) {
-                        if (p->falling_counter > 62) P_QuickKill(p);
+                        if (p->falling_counter > playerMaxFallTime) P_QuickKill(p);
 
-                        else if (p->falling_counter > 9) {
-                            j = p->falling_counter;
+                        else if (p->falling_counter > playerMaxFallTime/7) {
+                            j = p->falling_counter*62/playerMaxFallTime;
                             s->extra -= j-(krand()&3);
                             if (s->extra <= 0) {
                                 A_PlaySound(SQUISHED,pi);

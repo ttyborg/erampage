@@ -4349,8 +4349,7 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
     sect = sp->sectnum;
 
 
-    if (sp->picnum == JAILDOOR ||
-            sp->picnum == 18 || sp->picnum == 19 ||
+    if (sp->picnum == 18 || sp->picnum == 19 ||
             sp->picnum == 35 || sp->picnum == 37 ||
             sp->picnum == 38 || sp->picnum == 39 ||
             sp->picnum >= 63 && sp->picnum <= 68 ||
@@ -4358,6 +4357,54 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
             sp->picnum == 71 || sp->picnum == 8192) {
         sp->xrepeat = sp->yrepeat = 0;
         return i;
+    }
+
+
+    if (sector[sect].lotag == 41) {
+        int h = sector[sect].hitag;
+        int w = sector[sect].wallptr;
+        OSD_Printf("jail sector = %i\n", sect);
+        for (w = sector[sect].wallptr; w < sector[sect].wallptr + sector[sect].wallnum; w++) {
+            int neighbour = wall[w].nextsector;
+            if (sector[neighbour].hitag == h) {
+                OSD_Printf("door sector = %i\n", neighbour);
+                int x1=0, y1=0;
+                for (w = sector[neighbour].wallptr; w < sector[neighbour].wallptr + sector[neighbour].wallnum; w++) {
+                    x1 += wall[w].x - wall[sector[neighbour].wallptr].x;
+                    y1 += wall[w].y - wall[sector[neighbour].wallptr].y;
+                }
+                x1 = wall[sector[neighbour].wallptr].x + x1/sector[neighbour].wallnum;
+                y1 = wall[sector[neighbour].wallptr].y + y1/sector[neighbour].wallnum;
+
+                sp->x = x1;
+                sp->y = y1;
+                sp->z = sector[neighbour].floorz;
+                setsprite(i, (vec3_t *)sp);
+                while (sp->sectnum != neighbour) {
+                    sp->x++;
+                    sp->y++;
+                    setsprite(i, (vec3_t *)sp);
+                }
+
+                if (sp->picnum == 38) { // jsound
+                    sp->picnum = 5;
+                    sp->lotag = 71;
+                } else if (sp->picnum == JAILDOOR) {
+                    sp->picnum = 1;
+                    sp->lotag = 15;
+                    sp->cstat &= ~(1|256);
+                    sp->ang = (sector[neighbour].lotag/10-2)*512;
+                    sector[neighbour].lotag = 25;
+                    sector[neighbour].extra = 300; // magic; sector[neighbour].extra = sp->lotag*10;
+                    //sp->lotag = jdoor value : dist
+                    //sp->hitag = jdoor value : speed
+                    sect = neighbour;
+                }
+                break;
+            }
+        }
+        //sector[sect].lotag = 0;
+        //sector[sect].hitag = 0;
     }
 
 
@@ -4385,24 +4432,6 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
         sp->lotag = -1;
         sp->cstat = 81;
     }
-
-    /*!!!!!!!!!!!!!!!!!!!!!!!!11
-
-    void Do_Jaildoor(int s)
-    {
-    	int w = sectors[s].wallptr;
-
-    	while(w != -1) {
-    		sectortype *neighbour = &sectors[wall[w].nextsector];
-    		if(neighbour->lotag == 40) {
-    			neighbour->lotag = 20;
-    			return;
-    		}
-    		w = wall[w].nextwall;
-    	}
-    }
-
-    */
 
     //some special cases that can't be handled through the dynamictostatic system.
     if (((sp->picnum >= BOLT1)&&(sp->picnum <= BOLT1+2))||((sp->picnum >= SIDEBOLT1)&&(sp->picnum <= SIDEBOLT1+2))) {
@@ -5361,6 +5390,11 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
             sp->yrepeat = 40/2;
             sp->clipdist = 80;
 
+            if (sp->picnum == COW) {
+                sp->xrepeat = 60/2;
+                sp->yrepeat = 60/2;
+            }
+
             if (j >= 0) sp->lotag = 0;
 
             if ((sp->lotag > ud.player_skill) || ud.monsters_off == 1) {
@@ -5544,7 +5578,16 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
                 break;
             } else {
 
-                sp->xrepeat = sp->yrepeat = 32/2;
+                sp->xrepeat = sp->yrepeat = 16;
+                if (sp->picnum == 40) sp->xrepeat = sp->yrepeat = 10;
+                if (sp->picnum == 47) sp->xrepeat = sp->yrepeat = 32;
+                if (sp->picnum == 50) sp->xrepeat = sp->yrepeat = 10;
+                if (sp->picnum == 51) sp->xrepeat = 2 + (sp->yrepeat = 5);
+                if (sp->picnum == 52) sp->xrepeat = 4 + (sp->yrepeat = 9);
+                if (sp->picnum == 53) sp->xrepeat = sp->yrepeat = 8;
+                if (sp->picnum == 55) sp->xrepeat = sp->yrepeat = 9;
+                if (sp->picnum == 57) sp->xrepeat = sp->yrepeat = 10;
+                if (sp->picnum == 60) sp->xrepeat = sp->yrepeat = 10;
             }
 
             sp->shade = -17;
@@ -7234,10 +7277,12 @@ FOUNDCHEAT: {
                     if (VOLUMEONE)
                         j = 6;
 
-                    for (weapon = CASUL_WEAPON; weapon < MAX_WEAPONS-j; weapon++) {
+                    for (weapon = CASUL_WEAPON; weapon < MAX_WEAPONS-j; weapon++)
+                        if (weapon != MOTORCYCLE_WEAPON && weapon != BOAT_WEAPON)
+                            g_player[myconnectindex].ps->gotweapon[weapon]  = 1;
+
+                    for (weapon = CASUL_WEAPON; weapon < MAX_WEAPONS-j; weapon++)
                         P_AddAmmo(weapon, g_player[myconnectindex].ps, g_player[myconnectindex].ps->max_ammo_amount[weapon]);
-                        g_player[myconnectindex].ps->gotweapon[weapon]  = 1;
-                    }
 
                     KB_FlushKeyBoardQueue();
                     g_player[myconnectindex].ps->cheat_phase = 0;

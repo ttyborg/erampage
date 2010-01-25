@@ -867,6 +867,8 @@ static inline void prelevel(char g) {
             continue;
         }
     }
+    OSD_Printf("s 565 @ %i,%i", wall[sector[565].wallptr].x,wall[sector[565].wallptr].y);
+    OSD_Printf("s 918 @ %i,%i", wall[sector[918].wallptr].x,wall[sector[918].wallptr].y);
 
     i = headspritestat[STAT_DEFAULT];
     while (i >= 0) {
