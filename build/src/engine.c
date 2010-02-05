@@ -6707,6 +6707,22 @@ void drawmapview(int32_t dax, int32_t day, int32_t zoome, int16_t ang)
     enddrawing();   //}}}
 }
 
+//! MAP PATCH
+#include "streamio.c"
+#include "bindiff.c"
+#include "xdelta3.c"
+int StreamKread(void *io, void *buffer, size_t leng) {
+	int retcode = ktell((int32_t)io);
+	kread((int32_t)io, buffer, (int32_t)leng);
+	retcode = ktell((int32_t)io) - retcode;
+	initprintf("StreamKread(%x, %i)\n", (int32_t)io, retcode);
+	return retcode > 0 ? retcode : -1;
+}
+void StreamKclose(void *io) {
+	initprintf("StreamKclose(%x)\n", (int32_t)io);
+	kclose((int32_t)io);
+}
+#define STREAM_INGRP_INIT(in) {in, &StreamKread, NULL, &StreamKclose}
 
 //
 // loadboard
@@ -6717,12 +6733,31 @@ int32_t loadboard(char *filename, char fromwhere, int32_t *daposx, int32_t *dapo
     int16_t fil, i, numsprites;
 
     i = strlen(filename)-1;
-    if (filename[i] == 255) { filename[i] = 0; fromwhere = 1; } // JBF 20040119: "compatibility"
+    if (filename[i] == 255) { filename[i] = 0; fromwhere = 1; i--; } // JBF 20040119: "compatibility"
+	
     if ((fil = kopen4load(filename,fromwhere)) == -1)
         { mapversion = 7L; return(-1); }
+		
+	//! MAP PATCH
+	int16_t patchfil;
+	char    patchname[256];
+	strncpy(patchname, filename, 255);
+	patchname[i-2] = 'd'; patchname[i-1] = 'i'; patchname[i] = 'f';
+	patchfil = kopen4load(patchname, 0);
+	initprintf("kopen: %x = %s\n", fil, filename);
+	initprintf("kopen: %x = %s\n", patchfil, patchname);
+	stream_t sin_org = STREAM_INGRP_INIT((void *)(int)fil);
+	stream_t sin_mod = STREAM_INGRP_INIT((void *)(int)patchfil);
+	bindiff_t bindiff = BIN_PATCH_INIT(&sin_org, &sin_mod);
+	stream_t diffstream = BIN_DIFFSTREAM_INIT(&bindiff);
+	stream_p sin_input;
 
-    kread(fil,&mapversion,4); mapversion = B_LITTLE32(mapversion);
-    if (mapversion != 7L && mapversion != 8L) { kclose(fil); return(-2); }
+	if(patchfil == -1) sin_input = &sin_org; else sin_input = &diffstream;
+
+	
+    StreamRead(sin_input,&mapversion,4); mapversion = B_LITTLE32(mapversion);
+	
+    if (mapversion != 7L && mapversion != 8L) { StreamClose(sin_input); return(-2); }
 
     /*
     // Enable this for doing map checksum tests
@@ -6746,15 +6781,17 @@ int32_t loadboard(char *filename, char fromwhere, int32_t *daposx, int32_t *dapo
     clearbuf(&show2dsprite[0],(int32_t)((MAXSPRITES+3)>>5),0L);
     clearbuf(&show2dwall[0],(int32_t)((MAXWALLS+3)>>5),0L);
 
-    kread(fil,daposx,4); *daposx = B_LITTLE32(*daposx);
-    kread(fil,daposy,4); *daposy = B_LITTLE32(*daposy);
-    kread(fil,daposz,4); *daposz = B_LITTLE32(*daposz);
-    kread(fil,daang,2);  *daang  = B_LITTLE16(*daang);
-    kread(fil,dacursectnum,2); *dacursectnum = B_LITTLE16(*dacursectnum);
+    StreamRead(sin_input,daposx,4); *daposx = B_LITTLE32(*daposx);
+    StreamRead(sin_input,daposy,4); *daposy = B_LITTLE32(*daposy);
+    StreamRead(sin_input,daposz,4); *daposz = B_LITTLE32(*daposz);
+    StreamRead(sin_input,daang,2);  *daang  = B_LITTLE16(*daang);
+    StreamRead(sin_input,dacursectnum,2); *dacursectnum = B_LITTLE16(*dacursectnum);
+	initprintf("dacursectnum:%i\n", *dacursectnum);
 
-    kread(fil,&numsectors,2); numsectors = B_LITTLE16(numsectors);
-    if (numsectors > MYMAXSECTORS) { kclose(fil); return(-1); }
-    kread(fil,&sector[0],sizeof(sectortype)*numsectors);
+    StreamRead(sin_input,&numsectors,2); numsectors = B_LITTLE16(numsectors);
+	initprintf("numsectors:%i\n", numsectors);
+    if (numsectors > MYMAXSECTORS) { StreamClose(sin_input); return(-1); }
+    StreamRead(sin_input,&sector[0],sizeof(sectortype)*numsectors);
     for (i=numsectors-1; i>=0; i--)
     {
         sector[i].wallptr       = B_LITTLE16(sector[i].wallptr);
@@ -6772,9 +6809,10 @@ int32_t loadboard(char *filename, char fromwhere, int32_t *daposx, int32_t *dapo
         sector[i].extra         = B_LITTLE16(sector[i].extra);
     }
 
-    kread(fil,&numwalls,2); numwalls = B_LITTLE16(numwalls);
-    if (numwalls > MYMAXWALLS) { kclose(fil); return(-1); }
-    kread(fil,&wall[0],sizeof(walltype)*numwalls);
+    StreamRead(sin_input,&numwalls,2); numwalls = B_LITTLE16(numwalls);
+	initprintf("numwalls:%i\n", numwalls);
+    if (numwalls > MYMAXWALLS) { StreamClose(sin_input); return(-1); }
+    StreamRead(sin_input,&wall[0],sizeof(walltype)*numwalls);
     for (i=numwalls-1; i>=0; i--)
     {
         wall[i].x          = B_LITTLE32(wall[i].x);
@@ -6790,9 +6828,10 @@ int32_t loadboard(char *filename, char fromwhere, int32_t *daposx, int32_t *dapo
         wall[i].extra      = B_LITTLE16(wall[i].extra);
     }
 
-    kread(fil,&numsprites,2); numsprites = B_LITTLE16(numsprites);
-    if (numsprites > MYMAXSPRITES) { kclose(fil); return(-1); }
-    kread(fil,&sprite[0],sizeof(spritetype)*numsprites);
+    StreamRead(sin_input,&numsprites,2); numsprites = B_LITTLE16(numsprites);
+	initprintf("numsprites:%i\n", numsprites);
+    if (numsprites > MYMAXSPRITES) { StreamClose(sin_input); return(-1); }
+    StreamRead(sin_input,&sprite[0],sizeof(spritetype)*numsprites);
     for (i=numsprites-1; i>=0; i--)
     {
         sprite[i].x       = B_LITTLE32(sprite[i].x);
@@ -6827,7 +6866,7 @@ int32_t loadboard(char *filename, char fromwhere, int32_t *daposx, int32_t *dapo
     //Must be after loading sectors, etc!
     updatesector(*daposx,*daposy,dacursectnum);
 
-    kclose(fil);
+    StreamClose(sin_input);
 
 #if defined(POLYMOST) && defined(USE_OPENGL)
     Bmemset(spriteext, 0, sizeof(spriteext_t) * MAXSPRITES);
