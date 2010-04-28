@@ -1006,7 +1006,7 @@ int32_t P_ActivateSwitch(int32_t snum,int32_t w,int32_t switchtype) {
         picnum = wall[w].picnum;
         switchpal = wall[w].pal;
     }
-    //     initprintf("P_ActivateSwitch called picnum=%i switchtype=%i\n",picnum,switchtype);
+    initprintf("P_ActivateSwitch called picnum=%i switchtype=%i\n",picnum,switchtype);
     switchpicnum = picnum;
     if ((picnum==DIPSWITCH+1)
             || (picnum==TECHSWITCH+1)
@@ -2736,17 +2736,20 @@ CHECKINV1:
             if (aGameVars[g_iReturnVarID].val.lValue == 0) {
                 if (p->firstaid_amount > 0 && sprite[p->i].extra < p->max_player_health) {
                     j = p->max_player_health-sprite[p->i].extra;
+                    if (j > 10) j = 10;
 
                     if ((uint32_t)p->firstaid_amount > j) {
-                        p->firstaid_amount -= j;
-                        sprite[p->i].extra = p->max_player_health;
+                        p->firstaid_amount -= 10;
+                        sprite[p->i].extra += j;
+                        p->redneck_alcohol += 10;
+                        if (p->redneck_alcohol > 100) p->redneck_alcohol = 100;
                         p->inven_icon = 1;
                     } else {
                         sprite[p->i].extra += p->firstaid_amount;
                         p->firstaid_amount = 0;
                         P_SelectNextInvItem(p);
                     }
-                    A_PlaySound(DUKE_USEMEDKIT,p->i);
+                    A_PlaySound(425,p->i);
                 }
             }
         }
@@ -2962,8 +2965,22 @@ void P_CheckSectors(int32_t snum) {
             if (isanunderoperator(sector[sprite[p->i].sectnum].lotag))
                 neartagsector = sprite[p->i].sectnum;
 
-        if (neartagsector >= 0 && (sector[neartagsector].lotag&16384))
-            return;
+
+        if (neartagsector >= 0 && (sector[neartagsector].lotag&16384)) {
+            int32_t sj = headspritesect[neartagsector];
+            while (sj >= 0) {
+                if (sprite[sj].picnum == DOORLOCK)
+                    break;
+                sj = nextspritesect[sj];
+            }
+            if (sj > 0) {
+                //OSD_Printf("keycheck %d against %d\n",p->got_access, (1 << (sprite[sj].lotag+3)));
+                if (!(p->got_access & (1 << (sprite[sj].lotag+3)))) {
+                    P_DoQuote(41,p);
+                    return;
+                } else sector[neartagsector].lotag = sector[neartagsector].lotag^16384;
+            } else return;
+        }
 
         if (neartagsprite == -1 && neartagwall == -1)
             if (sector[p->cursectnum].lotag == 2) {

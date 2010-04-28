@@ -1762,6 +1762,11 @@ void G_DrawFrags(void) {
 }
 
 #define SBY (200-tilesizy[BOTTOMSTATUSBAR]/2)
+#define redneck_METER 62
+#define redneck_YELLOWLED 920
+#define redneck_GREENLED 921
+#define redneck_ORANGELED 922
+#define redneck_REDLED 923
 
 static void G_DrawStatusBar(int32_t snum) {
     DukePlayer_t *p = g_player[snum].ps;
@@ -1939,6 +1944,9 @@ static void G_DrawStatusBar(int32_t snum) {
                 }
 
             }
+
+
+
             return;
         }
         rotatesprite(sbarx(5),sbary(200-28),sbarsc(65536L/2),0,HEALTHBOX,0,21,10+16,0,0,xdim-1,ydim-1);
@@ -2275,6 +2283,39 @@ static void G_DrawStatusBar(int32_t snum) {
                 G_DrawInvNum(224-30-o,SBY+28,(uint8_t)i,0,10+permbit);
             }
         }
+    }
+
+
+
+    /*p->redneck_alcohol++;
+    p->redneck_gut++;
+    if(p->redneck_alcohol > 100) {
+    	p->redneck_alcohol = 0;
+    }
+    if(p->redneck_gut > 100) {
+    	p->redneck_gut = 0;
+    }*/
+
+    rotatesprite(sbarx(293),sbarx(SBY+15),(32768L),(p->redneck_gut-50)*9,redneck_METER,0,0,10,0,0,xdim-1,ydim-1);
+    if (p->redneck_gut < 41) {
+        rotatesprite(sbarx(280),sbary(SBY+28),(32768L),0,redneck_YELLOWLED,0,0,10,0,0,xdim-1,ydim-1);
+    } else if (p->redneck_gut < 61) {
+        rotatesprite(sbarx(289),sbary(SBY+28),(32768L),0,redneck_GREENLED,0,0,10,0,0,xdim-1,ydim-1);
+    } else if (p->redneck_gut < 81) {
+        rotatesprite(sbarx(298),sbary(SBY+28),(32768L),0,redneck_ORANGELED,0,0,10,0,0,xdim-1,ydim-1);
+    } else {
+        rotatesprite(sbarx(307),sbary(SBY+28),(32768L),0,redneck_REDLED,0,0,10,0,0,xdim-1,ydim-1);
+    }
+
+    rotatesprite(sbarx(257),sbary(SBY+15),(32768L),(p->redneck_alcohol-50)*9,redneck_METER,0,0,10,0,0,xdim-1,ydim-1);
+    if (p->redneck_alcohol < 41) {
+        rotatesprite(sbarx(244),sbary(SBY+28),sbarsc(32768L),0,redneck_YELLOWLED,0,0,10,0,0,xdim-1,ydim-1);
+    } else if (p->redneck_alcohol < 61) {
+        rotatesprite(sbarx(253),sbary(SBY+28),sbarsc(32768L),0,redneck_GREENLED,0,0,10,0,0,xdim-1,ydim-1);
+    } else if (p->redneck_alcohol < 81) {
+        rotatesprite(sbarx(261),sbary(SBY+28),sbarsc(32768L),0,redneck_ORANGELED,0,0,10,0,0,xdim-1,ydim-1);
+    } else {
+        rotatesprite(sbarx(270),sbary(SBY+28),sbarsc(32768L),0,redneck_REDLED,0,0,10,0,0,xdim-1,ydim-1);
     }
 }
 
@@ -4369,21 +4410,15 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
             if (sector[neighbour].hitag == h) {
                 OSD_Printf("door sector = %i\n", neighbour);
                 int x1=0, y1=0;
-                for (w = sector[neighbour].wallptr; w < sector[neighbour].wallptr + sector[neighbour].wallnum; w++) {
-                    x1 += wall[w].x - wall[sector[neighbour].wallptr].x;
-                    y1 += wall[w].y - wall[sector[neighbour].wallptr].y;
-                }
-                x1 = wall[sector[neighbour].wallptr].x + x1/sector[neighbour].wallnum;
-                y1 = wall[sector[neighbour].wallptr].y + y1/sector[neighbour].wallnum;
+                for (w = sector[neighbour].wallptr; w < sector[neighbour].wallptr + sector[neighbour].wallnum-1; w++) {
+                    x1 = wall[w].x/4 + wall[wall[w].point2].x/4 + wall[w+1].x/4 + wall[wall[w+1].point2].x/4;
+                    y1 = wall[w].y/4 + wall[wall[w].point2].y/4 + wall[w+1].y/4 + wall[wall[w+1].point2].y/4;
 
-                sp->x = x1;
-                sp->y = y1;
-                sp->z = sector[neighbour].floorz;
-                setsprite(i, (vec3_t *)sp);
-                while (sp->sectnum != neighbour) {
-                    sp->x++;
-                    sp->y++;
+                    sp->x = x1;
+                    sp->y = y1;
+                    sp->z = sector[neighbour].floorz;
                     setsprite(i, (vec3_t *)sp);
+                    if (sp->sectnum == neighbour) break;
                 }
 
                 if (sp->picnum == 38) { // jsound
@@ -4393,13 +4428,13 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
                     sp->picnum = 1;
                     sp->lotag = 15;
                     sp->cstat &= ~(1|256);
-                    sp->ang = (sector[neighbour].lotag/10-2)*512;
+                    sp->ang = ((2+(sector[neighbour].lotag&63)/10)%4)*512;
                     sector[neighbour].lotag = 25;
                     sector[neighbour].extra = 300; // magic; sector[neighbour].extra = sp->lotag*10;
                     //sp->lotag = jdoor value : dist
                     //sp->hitag = jdoor value : speed
-                    sect = neighbour;
                 }
+                sect = neighbour;
                 break;
             }
         }
@@ -4421,8 +4456,8 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
 
 
     if (sp->picnum == DOORLOCK) {
-        sp->picnum = ACTIVATORLOCKED;
-        sp->lotag = 6660+(sp->lotag-1)%3; // 6660-6662
+        //sp->picnum = ACTIVATORLOCKED;
+        sp->lotag = (sp->lotag-1)%3; // 0-2
         sp->hitag = 0;
     }
 
@@ -5436,8 +5471,9 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
 
         case ACTIVATORLOCKED__STATIC:
         case ACTIVATOR__STATIC:
+        case DOORLOCK__STATIC:
             sp->cstat = (int16_t) 32768;
-            if (sp->picnum == ACTIVATORLOCKED)
+            if (sp->picnum == ACTIVATORLOCKED || sp->picnum == DOORLOCK)
                 sector[sp->sectnum].lotag |= 16384;
             changespritestat(i,8);
             break;
@@ -10105,35 +10141,29 @@ void app_main(int32_t argc,const char **argv) {
     if (getenv("REDNECKGRP")) duke3dgrp = getenv("REDNECKGRP");
 
 #ifdef _WIN32
-    /*
-        if (ud.config.CheckForUpdates == -1)
-        {
-            i=wm_ynbox("Automatic Update Notifications",
-                       "Would you like to check for new versions of eRampage at startup?");
-            ud.config.CheckForUpdates = 0;
-            if (i) ud.config.CheckForUpdates = 1;
-        }
-    */
 
-//    initprintf("build %d\n",(uint8_t)atoi(BUILDDATE));
+    if (ud.config.CheckForUpdates == -1) {
+        i=wm_ynbox("Automatic Update Notifications",
+                   "Would you like to check for new versions of eRampage at startup?");
+        ud.config.CheckForUpdates = 0;
+        if (i) ud.config.CheckForUpdates = 1;
+    }
 
-    /* if (ud.config.CheckForUpdates == 1)
-    {
-        if (time(NULL) - ud.config.LastUpdateCheck > UPDATEINTERVAL)
-        {
+
+    initprintf("build %s\n",s_buildDate);
+
+    if (ud.config.CheckForUpdates == 1) {
+        if (time(NULL) - ud.config.LastUpdateCheck > UPDATEINTERVAL) {
             initprintf("Checking for updates...\n");
-            if (G_GetVersionFromWebsite(tempbuf))
-            {
-                initprintf("Current version is %d",atoi(tempbuf));
+            if (G_GetVersionFromWebsite(tempbuf)) {
+                initprintf("Current version is %s\n",tempbuf);
                 ud.config.LastUpdateCheck = time(NULL);
 
-                if (atoi(tempbuf) > atoi(s_buildDate))
-                {
+                if (strcmp(tempbuf,s_buildDate)) {
                     if (wm_ynbox("eRampage","A new version of eRampage is available. "
-                                 "Browse to http://code.google.com/p/erampage/ now?"))
-                    {
+                                 "Do you want to browse to the download page now?")) {
                         SHELLEXECUTEINFOA sinfo;
-                        char *p = "http://code.google.com/p/erampage/";
+                        char *p = "http://code.google.com/p/erampage/downloads/";
 
                         Bmemset(&sinfo, 0, sizeof(sinfo));
                         sinfo.cbSize = sizeof(sinfo);
@@ -10146,12 +10176,10 @@ void app_main(int32_t argc,const char **argv) {
                         if (!ShellExecuteExA(&sinfo))
                             initprintf("update: error launching browser!\n");
                     }
-                }
-                else initprintf("... no updates available\n");
-            }
-            else initprintf("update: failed to check for updates\n");
+                } else initprintf("... no updates available\n");
+            } else initprintf("update: failed to check for updates\n");
         }
-    }*/
+    }
 #endif
 
 #if defined(POLYMOST) && defined(USE_OPENGL)

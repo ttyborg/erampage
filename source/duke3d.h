@@ -58,7 +58,7 @@ extern "C" {
 
 #define APPNAME "eRampage"
 #define VERSION " 2.0.0devel"
-// this is checked against http://code.google.com/p/erampage/
+// this is checked against http://erampage.googlecode.com/files/VERSION
     extern const char *s_buildDate;
 #define HEAD2 APPNAME VERSION
 
@@ -494,6 +494,7 @@ extern "C" {
         char /*fire_flag, */pals[3];
         char return_to_center, reloading;
         char name[32];
+        int16_t redneck_gut, redneck_alcohol, redneck_counter;
     } DukePlayer_t;
 
     extern char tempbuf[2048], packbuf[576], menutextbuf[128];

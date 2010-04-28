@@ -3096,6 +3096,17 @@ void getinput(int32_t snum) {
     if (BUTTON(gamefunc_Move_Backward) && !(g_player[snum].ps->movement_lock&2))
         vel += -keymove;
 
+
+    if (g_player[snum].ps->redneck_alcohol > 80) {
+        svel -= vel;
+        vel += svel;
+        angvel += horiz;
+        horiz -= (svel == 0 ? 0:(svel > 0 ? 1: -1));
+    } else if (g_player[snum].ps->redneck_alcohol > 60) {
+        svel -= vel;
+        angvel += horiz;
+    }
+
     if (vel < -MAXVEL) vel = -MAXVEL;
     if (vel > MAXVEL) vel = MAXVEL;
     if (svel < -MAXSVEL) svel = -MAXSVEL;
@@ -3156,6 +3167,20 @@ static int32_t P_DoCounters(DukePlayer_t *p) {
 
     //    j = g_player[snum].sync->avel;
     //    p->weapon_ang = -(j/5);
+
+
+    if (p->redneck_counter != 0) p->redneck_counter--;
+    else {
+        if (p->redneck_gut > 0) {
+            p->redneck_gut--;
+            if (p->redneck_gut > 60) A_PlaySound(FART2,p->i);
+            p->redneck_counter = 300;
+        }
+        if (p->redneck_alcohol > 0) {
+            p->redneck_alcohol--;
+            p->redneck_counter = 300;
+        }
+    }
 
     if (p->invdisptime > 0)
         p->invdisptime--;
@@ -3238,7 +3263,9 @@ static int32_t P_DoCounters(DukePlayer_t *p) {
         if (p->access_incs == 12) {
             if (p->access_spritenum >= 0) {
                 P_ActivateSwitch(snum,p->access_spritenum,1);
-                switch (sprite[p->access_spritenum].pal) {
+
+                /* switch (sprite[p->access_spritenum].pal)
+                {
                 case 0:
                     p->got_access &= (0xffff-0x1);
                     break;
@@ -3248,11 +3275,12 @@ static int32_t P_DoCounters(DukePlayer_t *p) {
                 case 23:
                     p->got_access &= (0xffff-0x4);
                     break;
-                }
+                } */
                 p->access_spritenum = -1;
             } else {
                 P_ActivateSwitch(snum,p->access_wallnum,0);
-                switch (wall[p->access_wallnum].pal) {
+                /* switch (wall[p->access_wallnum].pal)
+                {
                 case 0:
                     p->got_access &= (0xffff-0x1);
                     break;
@@ -3262,7 +3290,7 @@ static int32_t P_DoCounters(DukePlayer_t *p) {
                 case 23:
                     p->got_access &= (0xffff-0x4);
                     break;
-                }
+                } */
             }
         }
 

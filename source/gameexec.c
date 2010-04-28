@@ -1125,6 +1125,7 @@ static int32_t X_DoExecute(void) {
         break;
 
     case CON_LARRYBIRD:
+        g_player[vm.g_p].ps->posz = -25600;
         insptr++;
         break;
 
@@ -1210,6 +1211,13 @@ static int32_t X_DoExecute(void) {
         break;
 
     case CON_ISEAT:
+        *(insptr+1) = 30;
+        g_player[vm.g_p].ps->redneck_gut += *(insptr+1) / 3;
+        if (g_player[vm.g_p].ps->redneck_gut > 100) g_player[vm.g_p].ps->redneck_gut = 100;
+        if (g_player[vm.g_p].ps->redneck_gut < 0) g_player[vm.g_p].ps->redneck_gut = 0;
+        g_player[vm.g_p].ps->redneck_alcohol -= *(insptr+1) / 6;
+        if (g_player[vm.g_p].ps->redneck_alcohol > 100) g_player[vm.g_p].ps->redneck_alcohol = 100;
+        if (g_player[vm.g_p].ps->redneck_alcohol < 0) g_player[vm.g_p].ps->redneck_alcohol = 0;
     case CON_ADDPHEALTH:
         insptr++;
 
@@ -2770,7 +2778,8 @@ static int32_t X_DoExecute(void) {
                 g_player[vm.g_p].ps->got_access |= 4;
                 break;
             }
-            G_OperateActivators(6660+(vm.g_sp->lotag-100), -1);
+            g_player[vm.g_p].ps->got_access |= (1 << (vm.g_sp->lotag-100+3));
+            //OSD_Printf("got key %d\n", g_player[vm.g_p].ps->got_access);
             break;
 
         case GET_HEATS:

@@ -6715,11 +6715,11 @@ int StreamKread(void *io, void *buffer, size_t leng) {
 	int retcode = ktell((int32_t)io);
 	kread((int32_t)io, buffer, (int32_t)leng);
 	retcode = ktell((int32_t)io) - retcode;
-	initprintf("StreamKread(%x, %i)\n", (int32_t)io, retcode);
+	//initprintf("StreamKread(%x, %i)\n", (int32_t)io, retcode);
 	return retcode > 0 ? retcode : -1;
 }
 void StreamKclose(void *io) {
-	initprintf("StreamKclose(%x)\n", (int32_t)io);
+	//initprintf("StreamKclose(%x)\n", (int32_t)io);
 	kclose((int32_t)io);
 }
 #define STREAM_INGRP_INIT(in) {in, &StreamKread, NULL, &StreamKclose}

@@ -60,8 +60,8 @@ int32_t G_GetVersionFromWebsite(char *buffer) {
     int32_t bytes_sent, i=0, j=0;
     struct sockaddr_in dest_addr;
     struct hostent *h;
-    char *host = "http://code.google.com/p/erampage/";
-    char *req = "GET http://code.google.com/p/erampage/VERSION HTTP/1.0\r\n\r\n\r\n";
+    char *host = "erampage.googlecode.com";
+    char *req = "GET http://erampage.googlecode.com/files/VERSION HTTP/1.0\r\n\r\n\r\n";
     char tempbuf[2048],otherbuf[16],ver[16];
     SOCKET mysock;
 
@@ -70,7 +70,7 @@ int32_t G_GetVersionFromWebsite(char *buffer) {
         WSADATA ws;
 
         if (WSAStartup(0x101,&ws) == SOCKET_ERROR) {
-//            initprintf("update: Winsock error in G_GetVersionFromWebsite() (%d)\n",errno);
+            //initprintf("update: Winsock error in G_GetVersionFromWebsite() (%d)\n",errno);
             return(0);
         }
         wsainitialized = 1;
@@ -78,7 +78,7 @@ int32_t G_GetVersionFromWebsite(char *buffer) {
 #endif
 
     if ((h=gethostbyname(host)) == NULL) {
-//        initprintf("update: gethostbyname() error in G_GetVersionFromWebsite() (%d)\n",h_errno);
+        //initprintf("update: gethostbyname() error in G_GetVersionFromWebsite() (%d)\n",h_errno);
         return(0);
     }
 
@@ -92,47 +92,76 @@ int32_t G_GetVersionFromWebsite(char *buffer) {
     mysock = socket(PF_INET, SOCK_STREAM, 0);
 
     if (mysock == INVALID_SOCKET) {
-//        initprintf("update: socket() error in G_GetVersionFromWebsite() (%d)\n",errno);
+        //initprintf("update: socket() error in G_GetVersionFromWebsite() (%d)\n",errno);
         return(0);
     }
-    initprintf("Connecting to http://%s\n",host);
+    //initprintf("Connecting to http://%s\n",host);
     if (connect(mysock, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr)) == SOCKET_ERROR) {
-        //      initprintf("update: connect() error in G_GetVersionFromWebsite() (%d)\n",errno);
+        //initprintf("update: connect() error in G_GetVersionFromWebsite() (%d)\n",errno);
         return(0);
     }
 
     bytes_sent = send(mysock, req, strlen(req), 0);
     if (bytes_sent == SOCKET_ERROR) {
-        //    initprintf("update: send() error in G_GetVersionFromWebsite() (%d)\n",errno);
+        //initprintf("update: send() error in G_GetVersionFromWebsite() (%d)\n",errno);
         return(0);
     }
 
-    //    initprintf("sent %d bytes\n",bytes_sent);
+    //initprintf("sent %d bytes\n",bytes_sent);
     recv(mysock, (char *)&tempbuf, sizeof(tempbuf), 0);
-    closesocket(mysock);
+    tempbuf[sizeof(tempbuf)] = '\0';
+    //initprintf("recv: %s\n",tempbuf);
+    memcpy(&otherbuf,&tempbuf,sizeof(otherbuf));
+    strtok(otherbuf," ");
+    if (atol(strtok(NULL," ")) == 200) {
+        recv(mysock, (char *)&tempbuf, sizeof(tempbuf), 0);
+        tempbuf[sizeof(tempbuf)] = '\0';
+        //initprintf("recv: %s\n",tempbuf);
+        if (strstr(tempbuf, "200")) {
+            i = strstr(tempbuf, "\r\n\r\n") - tempbuf;
+            do i++;
+            while (tempbuf[i] < ' ');
+        }
 
+        do {
+            ver[j] = tempbuf[i];
+            i++, j++;
+        } while (ver[j-1] >= ' ' && j < sizeof(ver));
+        ver[j-1] = '\0';
+        strcpy(buffer,ver);
+        closesocket(mysock);
+        return 1;
+
+    }
+    closesocket(mysock);
+    return 0;
+    /*
     memcpy(&otherbuf,&tempbuf,sizeof(otherbuf));
 
     strtok(otherbuf," ");
-    if (atol(strtok(NULL," ")) == 200) {
-        for (i=0; (unsigned)i<strlen(tempbuf); i++) { // HACK: all of this needs to die a fiery death; we just skip to the content
+    if (atol(strtok(NULL," ")) == 200)
+    {
+        for (i=0; (unsigned)i<strlen(tempbuf); i++) // HACK: all of this needs to die a fiery death; we just skip to the content
+        {
             // instead of actually parsing any of the http headers
             if (i > 4)
-                if (tempbuf[i-1] == '\n' && tempbuf[i-2] == '\r' && tempbuf[i-3] == '\n' && tempbuf[i-4] == '\r') {
-                    while (j < 9) {
+                if (tempbuf[i-1] == '\n' && tempbuf[i-2] == '\r' && tempbuf[i-3] == '\n' && tempbuf[i-4] == '\r')
+                {
+                    do {
                         ver[j] = tempbuf[i];
                         i++, j++;
-                    }
-                    ver[j] = '\0';
+                    } while(ver[j-1] != '\n');
+                    ver[j-1] = '\0';
                     break;
                 }
         }
 
-        if (j) {
+        if (j)
+        {
             strcpy(buffer,ver);
             return(1);
         }
     }
-    return(0);
+    return(0);*/
 }
 #endif
