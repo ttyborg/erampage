@@ -2769,16 +2769,16 @@ static int32_t X_DoExecute(void) {
         case GET_ACCESS:
             switch (vm.g_sp->pal) {
             case  0:
-                g_player[vm.g_p].ps->got_access |= 1;
+                g_player[vm.g_p].ps->got_access |= 8;
                 break;
             case 21:
-                g_player[vm.g_p].ps->got_access |= 2;
+                g_player[vm.g_p].ps->got_access |= 16;
                 break;
             case 23:
-                g_player[vm.g_p].ps->got_access |= 4;
+                g_player[vm.g_p].ps->got_access |= 32;
                 break;
             }
-            g_player[vm.g_p].ps->got_access |= (1 << (vm.g_sp->lotag-100+3));
+            g_player[vm.g_p].ps->got_access |= (1 << (vm.g_sp->lotag-100));
             //OSD_Printf("got key %d\n", g_player[vm.g_p].ps->got_access);
             break;
 
@@ -4166,13 +4166,13 @@ static int32_t X_DoExecute(void) {
             case GET_ACCESS:
                 switch (vm.g_sp->pal) {
                 case  0:
-                    if (g_player[vm.g_p].ps->got_access&1) j = 1;
+                    if (g_player[vm.g_p].ps->got_access&8) j = 1;
                     break;
                 case 21:
-                    if (g_player[vm.g_p].ps->got_access&2) j = 1;
+                    if (g_player[vm.g_p].ps->got_access&16) j = 1;
                     break;
                 case 23:
-                    if (g_player[vm.g_p].ps->got_access&4) j = 1;
+                    if (g_player[vm.g_p].ps->got_access&32) j = 1;
                     break;
                 }
                 j = 0;

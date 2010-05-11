@@ -47,6 +47,7 @@ void *kmalloc(bsize_t size) { return(Bmalloc(size)); }
 void kfree(void *buffer) { Bfree(buffer); }
 #define kkfree kfree
 
+int32_t editorgridextent = 131072; //!
 #ifdef SUPERBUILD
 void loadvoxel(int32_t voxindex) { voxindex=0; }
 int32_t tiletovox[MAXTILES];
@@ -54,7 +55,7 @@ int32_t usevoxels = 1;
 #define kloadvoxel loadvoxel
 
 int32_t novoxmips = 0;
-int32_t editorgridextent = 131072;
+//! int32_t editorgridextent = 131072;
 
 //These variables need to be copied into BUILD
 #define MAXXSIZ 256

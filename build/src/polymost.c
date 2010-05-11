@@ -4717,6 +4717,7 @@ void polymost_drawsprite(int32_t snum)
             if (mddraw(tspr)) return;
             break;	// else, render as flat sprite
         }
+#ifdef SUPERBUILD
         if (usevoxels && (tspr->cstat&48)!=48 && tiletovox[tspr->picnum] >= 0 && voxmodels[ tiletovox[tspr->picnum] ])
         {
             if (voxdraw(voxmodels[ tiletovox[tspr->picnum] ], tspr)) return;
@@ -4727,6 +4728,7 @@ void polymost_drawsprite(int32_t snum)
             voxdraw(voxmodels[ tspr->picnum ], tspr);
             return;
         }
+#endif
         break;
     }
     if (((tspr->cstat&2) || (gltexmayhavealpha(tspr->picnum,tspr->pal))))

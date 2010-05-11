@@ -620,7 +620,7 @@ static void P_ResetStatus(int32_t snum) {
     p->toggle_key_flag  = 0;
     p->access_spritenum = -1;
     if (ud.multimode > 1 && (GametypeFlags[ud.coop] & GAMETYPE_ACCESSATSTART))
-        p->got_access = 7;
+        p->got_access = 63;
     else p->got_access      = 0;
     p->random_club_frame= 0;
     pus = 1;
@@ -671,6 +671,15 @@ static void P_ResetStatus(int32_t snum) {
     p->reloading        = 0;
 
     p->movement_lock     = 0;
+
+
+    p->redneck_gut = p->redneck_alcohol = p->redneck_counter = 0;
+    if (p->curr_weapon == MOTORCYCLE_WEAPON || p->curr_weapon == BOAT_WEAPON)
+        p->curr_weapon = CROWBAR_WEAPON;
+    p->gotweapon[MOTORCYCLE_WEAPON] = 0;
+    //p->ammo_amount[MOTORCYCLE_WEAPON] = 0;
+    p->gotweapon[BOAT_WEAPON] = 0;
+    //p->ammo_amount[BOAT_WEAPON] = 0;
 
     P_UpdateScreenPal(p);
     X_OnEvent(EVENT_RESETPLAYER, p->i, snum, -1);
@@ -1136,7 +1145,9 @@ void G_NewGame(int32_t vn,int32_t ln,int32_t sk) {
     if (ud.m_recstat != 2 && ud.last_level >= 0 && ud.multimode > 1 && (ud.coop&GAMETYPE_SCORESHEET))
         G_BonusScreen(1);
 
-    if (ln == 0 && vn == 3 && ud.multimode < 2 && ud.lockout == 0) {
+
+    /*if (ln == 0 && vn == 0 && ud.multimode < 2 && ud.lockout == 0)
+    {
         S_PlayMusic(&EnvMusicFilename[1][0],MAXVOLUMES*MAXLEVELS+1);
 
         flushperms();
@@ -1144,17 +1155,17 @@ void G_NewGame(int32_t vn,int32_t ln,int32_t sk) {
         clearview(0L);
         nextpage();
 
-        G_PlayAnim("vol41a.anm",6);
+        G_PlayAnim("RR_INTRO.anm",6);
         clearview(0L);
         nextpage();
 
-        G_PlayAnim("vol42a.anm",7);
-        G_PlayAnim("vol43a.anm",9);
+        G_PlayAnim("RR_OUTRO.anm",7);
+        G_PlayAnim("TURDMOV.anm",9);
         clearview(0L);
         nextpage();
 
         FX_StopAllSounds();
-    }
+    }*/
 
     g_showShareware = GAMETICSPERSEC*34;
 

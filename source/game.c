@@ -4453,15 +4453,6 @@ int32_t A_Spawn(int32_t j, int32_t pn) {
     }
 
 
-
-
-    if (sp->picnum == DOORLOCK) {
-        //sp->picnum = ACTIVATORLOCKED;
-        sp->lotag = (sp->lotag-1)%3; // 0-2
-        sp->hitag = 0;
-    }
-
-
     if (sp->picnum == NUKEBUTTON) {
         sp->picnum = LIGHTSWITCH;
         sp->lotag = -1;
@@ -7334,7 +7325,7 @@ FOUNDCHEAT: {
                     return;
 
                 case CHEAT_KEYS:
-                    g_player[myconnectindex].ps->got_access =  7;
+                    g_player[myconnectindex].ps->got_access =  63;
                     KB_FlushKeyBoardQueue();
                     g_player[myconnectindex].ps->cheat_phase = 0;
                     P_DoQuote(121,g_player[myconnectindex].ps);
@@ -7464,7 +7455,7 @@ FOUNDCHEAT: {
                             weapon++)
                         P_AddAmmo(weapon, g_player[myconnectindex].ps, g_player[myconnectindex].ps->max_ammo_amount[weapon]);
                     G_CheatGetInv();
-                    g_player[myconnectindex].ps->got_access =              7;
+                    g_player[myconnectindex].ps->got_access = 63;
                     P_DoQuote(5,g_player[myconnectindex].ps);
                     g_player[myconnectindex].ps->cheat_phase = 0;
 
@@ -7576,7 +7567,7 @@ FOUNDCHEAT: {
 
                 case CHEAT_ITEMS:
                     G_CheatGetInv();
-                    g_player[myconnectindex].ps->got_access =              7;
+                    g_player[myconnectindex].ps->got_access = 63;
                     P_DoQuote(5,g_player[myconnectindex].ps);
                     g_player[myconnectindex].ps->cheat_phase = 0;
                     KB_FlushKeyBoardQueue();
@@ -12229,7 +12220,44 @@ FRAGBONUS:
         break;
     }*/
 
-    rotatesprite(0,0,65536L,0,BONUSSCREEN+gfx_offset,0,0,2+8+16+64+128,0,0,xdim-1,ydim-1);
+
+    if (GAME_RA) {
+        char anm_name[32];
+        sprintf(anm_name, "LVL%d.ANM",ud.last_level+ud.volume_number*7);
+        flushperms();
+        setview(0,0,xdim-1,ydim-1);
+        clearview(0L);
+        nextpage();
+
+
+        G_PlayAnim(anm_name,ud.last_level+ud.volume_number*7);
+
+#define E2L7         283
+#define E2L6         255
+#define E2L5         230
+#define E2L4         198
+#define E2L3         177
+#define E2L2         176
+#define E2L1         105
+#define E1L7         104
+#define E1L6         103
+#define E1L5         102
+#define E1L4         80
+#define E1L3         77
+#define E1L2         64
+#define E1L1         63
+
+
+        //switch(ud.last_level+ud.volume_number*10) {
+        //	case 1:
+        //		S_PlaySound(E1L1);
+        //		break;
+        //}
+        //clearview(0L);
+        //nextpage();
+
+        //FX_StopAllSounds();
+    } else rotatesprite(0,0,65536L,0,BONUSSCREEN+gfx_offset,0,0,2+8+16+64+128,0,0,xdim-1,ydim-1);
 
     menutext(160,20-6,0,0,lastmapname);
     menutext(160,36-6,0,0,"COMPLETED");
@@ -12279,7 +12307,9 @@ FRAGBONUS:
         AudioUpdate();
 
         if (g_player[myconnectindex].ps->gm&MODE_EOL) {
-            rotatesprite(0,0,65536L,0,BONUSSCREEN+gfx_offset,0,0,2+8+16+64+128,0,0,xdim-1,ydim-1);
+
+
+            if (totalclock > 200) rotatesprite(0,0,65536L,0,BONUSSCREEN+gfx_offset,0,0,2+8+16+64+128,0,0,xdim-1,ydim-1);
 
             if (totalclock > (1000000000L) && totalclock < (1000000320L)) {
                 switch ((totalclock>>4)%15) {

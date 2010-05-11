@@ -1912,8 +1912,8 @@ void P_FireWeapon(DukePlayer_t *p) {
             p->ammo_amount[p->curr_weapon]--;
 
 
-
-        if (p->curr_weapon==CROSSBOW_WEAPON) p->ammo_amount[DYNAMITE_WEAPON]--;
+        if (p->curr_weapon==CROSSBOW_WEAPON)
+            p->ammo_amount[DYNAMITE_WEAPON] = p->ammo_amount[CROSSBOW_WEAPON];
 
 
         if (aplWeaponFireSound[p->curr_weapon][snum]) {
@@ -3371,6 +3371,10 @@ void P_AddAmmo(int32_t weapon,DukePlayer_t *p,int32_t amount) {
 
     if (p->ammo_amount[weapon] > p->max_ammo_amount[weapon])
         p->ammo_amount[weapon] = p->max_ammo_amount[weapon];
+
+
+    if (weapon == DYNAMITE_WEAPON) p->ammo_amount[CROSSBOW_WEAPON] = p->ammo_amount[DYNAMITE_WEAPON];
+    else if (weapon == CROSSBOW_WEAPON) p->ammo_amount[DYNAMITE_WEAPON] = p->ammo_amount[CROSSBOW_WEAPON];
 }
 
 void P_AddWeaponNoSwitch(DukePlayer_t *p, int32_t weapon) {
@@ -4999,7 +5003,9 @@ SHOOTINCODE:
             if ((*kb)==aplWeaponHoldDelay[p->curr_weapon][snum]) {
                 int32_t lPipeBombControl;
 
+
                 p->ammo_amount[p->curr_weapon]--;
+                p->ammo_amount[CROSSBOW_WEAPON] = p->ammo_amount[DYNAMITE_WEAPON];
 
                 if (p->on_ground && TEST_SYNC_KEY(sb_snum, SK_CROUCH)) {
                     k = 15;

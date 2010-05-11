@@ -1047,19 +1047,19 @@ int32_t P_ActivateSwitch(int32_t snum,int32_t w,int32_t switchtype) {
     case ACCESSSWITCH2__STATIC:
         if (g_player[snum].ps->access_incs == 0) {
             if (switchpal == 0) {
-                if ((g_player[snum].ps->got_access&1))
+                if ((g_player[snum].ps->got_access&8))
                     g_player[snum].ps->access_incs = 1;
                 else P_DoQuote(70,g_player[snum].ps);
             }
 
             else if (switchpal == 21) {
-                if (g_player[snum].ps->got_access&2)
+                if (g_player[snum].ps->got_access&16)
                     g_player[snum].ps->access_incs = 1;
                 else P_DoQuote(71,g_player[snum].ps);
             }
 
             else if (switchpal == 23) {
-                if (g_player[snum].ps->got_access&4)
+                if (g_player[snum].ps->got_access&32)
                     g_player[snum].ps->access_incs = 1;
                 else P_DoQuote(72,g_player[snum].ps);
             }
@@ -2974,8 +2974,8 @@ void P_CheckSectors(int32_t snum) {
                 sj = nextspritesect[sj];
             }
             if (sj > 0) {
-                //OSD_Printf("keycheck %d against %d\n",p->got_access, (1 << (sprite[sj].lotag+3)));
-                if (!(p->got_access & (1 << (sprite[sj].lotag+3)))) {
+                //OSD_Printf("keycheck %d against %d\n",p->got_access, (1 << (sprite[sj].lotag)));
+                if (!(p->got_access & (1 << (sprite[sj].lotag-1)%3))) {
                     P_DoQuote(41,p);
                     return;
                 } else sector[neartagsector].lotag = sector[neartagsector].lotag^16384;
