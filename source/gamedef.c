@@ -1902,6 +1902,55 @@ static int32_t C_ParseCommand(void) {
     default:
     case -1:
         return 0; //End
+
+
+    case CON_MOTOLOOPSND:
+    case CON_FAKEBUBBA:
+    case CON_GARYBANJO:
+    case CON_MAMAQUAKE:
+    case CON_MAMASPAWN:
+    case CON_MAMATRIGGER:
+    case CON_MAMAEND:
+    case CON_SMACKBUBBA:
+    case CON_LARRYBIRD:
+
+        i = hash_find(&gamevarH,keyw[tw]);
+        if (i>=0) {
+            g_numCompilerWarnings++;
+            C_ReportError(WARNING_NAMEMATCHESVAR);
+        }
+
+        j = hash_find(&labelH,keyw[tw]);
+        if (j>=0) {
+            *(g_scriptPtr-1) = CON_STATE;
+            if (labeltype[j] & LABEL_STATE) {
+                if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1)
+                    initprintf("%s:%d: debug: accepted state label `%s'.\n",g_szScriptFileName,g_lineNumber,label+(j<<6));
+                *g_scriptPtr = labelcode[j];
+                if (labelcode[j] >= (intptr_t)&script[0] && labelcode[j] < (intptr_t)&script[g_scriptSize])
+                    bitptr[(g_scriptPtr-script)>>3] |= (BITPTR_POINTER<<((g_scriptPtr-script)&7));
+                else bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                g_scriptPtr++;
+                return 0;
+            } else {
+                char *gl = (char *)C_GetLabelType(labeltype[j]);
+                C_ReportError(-1);
+                initprintf("%s:%d: warning: expected state, found %s.\n",g_szScriptFileName,g_lineNumber,gl);
+                g_numCompilerWarnings++;
+                Bfree(gl);
+                *(g_scriptPtr-1) = CON_NULLOP; // get rid of the state, leaving a nullop to satisfy if conditions
+                bitptr[(g_scriptPtr-script-1)>>3] &= ~(1<<((g_scriptPtr-script-1)&7));
+                return 0;  // valid label name, but wrong type
+            }
+        } else {
+            C_ReportError(-1);
+            initprintf("%s:%d: warning: state `%s' not found. Using internal implementation\n",g_szScriptFileName,g_lineNumber,keyw[tw]);
+            g_numCompilerWarnings++;
+            return 0;
+        }
+
+
+
     case CON_STATE:
         if (g_parsingActorPtr == 0 && g_processingState == 0) {
             C_GetNextLabelName();

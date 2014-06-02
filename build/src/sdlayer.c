@@ -764,7 +764,7 @@ void getvalidmodes(void)
     static int32_t defaultres[][2] =
     {
         {1280,1024}
-        ,{1280,960},{1152,864},{1024,768},{800,600},{640,480},
+        ,{1280,960},{1152,864},{1024,768},{800,600},{800,480},{640,480}, //! added OpenPandora res
         {640,400},{512,384},{480,360},{400,300},{320,240},{320,200},{0,0}
     };
     SDL_Rect **modes;
@@ -946,7 +946,7 @@ int32_t setvideomode(int32_t x, int32_t y, int32_t c, int32_t fs)
     }
 
     if (checkvideomode(&x,&y,c,fs,0) < 0) return -1;
-
+	fs = 1; //! dirty hack to make it run fullscreen on OpenPandora
     startwin_close();
 
     if (mouseacquired)

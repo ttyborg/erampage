@@ -7993,7 +7993,22 @@ int32_t loadpics(char *filename, int32_t askedsize)
         artfilename[7] = (k%10)+48;
         artfilename[6] = ((k/10)%10)+48;
         artfilename[5] = ((k/100)%10)+48;
-        if ((fil = kopen4load(artfilename,0)) != -1)
+		fil = kopen4load(artfilename,0);
+		if(fil == -1) {  //! recognize tilesa66.art and tilesb66.art
+			if(k == 24) {
+				artfilename[7] = '6';
+				artfilename[6] = '6';
+				artfilename[5] = 'a';
+				fil = kopen4load(artfilename,0);
+			}
+			if(k == 25) {
+				artfilename[7] = '6';
+				artfilename[6] = '6';
+				artfilename[5] = 'b';
+				fil = kopen4load(artfilename,0);
+			}
+		}
+        if (fil != -1)
         {
             kread(fil,&artversion,4); artversion = B_LITTLE32(artversion);
             if (artversion != 1)

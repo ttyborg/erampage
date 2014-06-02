@@ -1094,6 +1094,23 @@ static int32_t X_DoExecute(void) {
         sector[sprite[g_player[vm.g_p].ps->i].sectnum].lotag = 65535;
         break;
 
+    case CON_LARRYBIRD:
+        g_player[vm.g_p].ps->posz = -25600;
+        insptr++;
+        break;
+
+    case CON_MOTOLOOPSND:
+        insptr++;
+        if (!A_CheckSoundPlaying(vm.g_i,188))
+            A_PlaySound(188,vm.g_i);
+        break;
+
+    case CON_GARYBANJO:
+        insptr++;
+        if (!A_CheckSoundPlaying(vm.g_i,273))
+            A_PlaySound(273,vm.g_i);
+        break;
+
     case CON_STRAFERIGHT:
         insptr++;
         break;
@@ -1102,34 +1119,11 @@ static int32_t X_DoExecute(void) {
         insptr++;
         break;
 
-    case CON_MOTOLOOPSND:
-        insptr++;
-        A_PlaySound(188,vm.g_i);
-        break;
-
-    case CON_GARYBANJO:
-        insptr++;
-        A_PlaySound(262,vm.g_i); //? :(
-        break;
-
     case CON_SOUNDTAGONCE:
         insptr++;
         break;
 
-    case CON_FAKEBUBBA:
-        insptr++;
-        break;
-
     case CON_TEARITUP:
-        insptr++;
-        break;
-
-    case CON_LARRYBIRD:
-        g_player[vm.g_p].ps->posz = -25600;
-        insptr++;
-        break;
-
-    case CON_MAMAQUAKE:
         insptr++;
         break;
 
@@ -1143,19 +1137,6 @@ static int32_t X_DoExecute(void) {
 
     case CON_DESTROYIT:
         insptr++;
-        break;
-
-    case CON_MAMASPAWN:
-        insptr++;
-        break;
-
-    case CON_MAMATRIGGER:
-        insptr++;
-        break;
-
-    case CON_MAMAEND:
-        insptr++;
-        sector[sprite[g_player[vm.g_p].ps->i].sectnum].lotag = 65535;
         break;
 
     case CON_LEAVEDROPPINGS:
