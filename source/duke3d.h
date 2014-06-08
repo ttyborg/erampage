@@ -31,7 +31,10 @@ extern "C" {
 #endif
 
 
-//
+
+
+
+
 
 
 // JBF
@@ -44,17 +47,27 @@ extern "C" {
 #include "cache1d.h"
 #include "pragmas.h"
 
-#ifdef RANCID_NETWORKING
-#include "mmulti_unstable.h"
-#else
-#include "mmulti.h"
-#endif
-
 #include "baselayer.h"
 
 #include "function.h"
 
 #include "macros.h"
+
+#include "enet/enet.h"
+
+    extern ENetHost * g_netServer;
+    extern ENetHost * g_netClient;
+    extern ENetPeer * g_netClientPeer;
+
+    enum netchan_t
+    {
+        CHAN_MOVE,      // unreliable movement packets
+        CHAN_GAMESTATE, // gamestate changes... frags, respawns, player names, etc
+        CHAN_SYNC,      // client join sync packets
+        CHAN_CHAT,      // chat and RTS
+        CHAN_MISC,      // whatever else
+        CHAN_MAX
+    };
 
 #define APPNAME "eRampage"
 #define VERSION " 2.0.0devel"
@@ -92,7 +105,7 @@ extern "C" {
 
 #define AUTO_AIM_ANGLE          48
 #define RECSYNCBUFSIZ 2520   //2520 is the (LCM of 1-8)*3
-#define MOVEFIFOSIZ 256
+#define MOVEFIFOSIZ 2
 
 #define FOURSLEIGHT (1<<8)
 
@@ -230,16 +243,19 @@ extern "C" {
         pfacing         = 65536
     };
 
-    enum InventoryItem_t {
+    enum DukeInventory_t {
         GET_STEROIDS,
         GET_SHIELD,
         GET_SCUBA,
         GET_HOLODUKE,
         GET_JETPACK,
-        GET_ACCESS   = 6,
+        GET_DUMMY1,
+        GET_ACCESS,
         GET_HEATS,
-        GET_FIRSTAID = 9,
-        GET_BOOTS
+        GET_DUMMY2,
+        GET_FIRSTAID,
+        GET_BOOTS,
+        GET_MAX
     };
 
     enum DukeWeapon_t {
@@ -266,11 +282,13 @@ extern "C" {
 #define deletesprite A_DeleteSprite
     void A_DeleteSprite(int32_t s);
 
+#pragma pack(push,1)
+
     typedef struct {
-        uint32_t bits;
-        int16_t fvel, svel;
-        int8_t avel, horz;
-        char extbits;
+        uint32_t bits; // 4b
+        int16_t fvel, svel; // 4b
+        int8_t avel, horz; // 2b
+        int8_t extbits, filler; // 2b
     } input_t;
 
 #define sync dsync  // JBF 20040604: sync is a function on some platforms
@@ -279,19 +297,21 @@ extern "C" {
     extern int32_t movefifosendplc;
 
     typedef struct {
-        int32_t voice;
-        int32_t i;
+        int16_t voice;
+        int16_t i;
     } SOUNDOWNER;
 
+#define MAXSOUNDINSTANCES 8
+
     typedef struct {
-        int32_t  length, num, soundsiz;
-        char *filename, *ptr, *filename1;
-        SOUNDOWNER SoundOwner[4];
-        int16_t ps,pe,vo;
-        char pr,m;
-        volatile char lock;
+        int32_t  length, num, soundsiz; // 12b
+        char *filename, *ptr, *filename1; // 12b/24b
+        SOUNDOWNER SoundOwner[MAXSOUNDINSTANCES]; // 32b
+        int16_t ps,pe,vo; // 6b
+        char pr,m; // 2b
     } sound_t;
 
+    extern volatile char g_soundlocks[MAXSOUNDS];
     extern sound_t g_sounds[MAXSOUNDS];
 
     typedef struct {
@@ -305,7 +325,6 @@ extern "C" {
 
     extern char typebuflen;
     extern char typebuf[141];
-    extern char *MusicPtr;
     extern int32_t g_musicSize;
     extern int32_t msx[2048],msy[2048];
     extern int16_t cyclers[MAXCYCLERS][6],g_numCyclers;
@@ -318,70 +337,7 @@ extern "C" {
     };
 
     typedef struct {
-        int32_t UseJoystick;
-        int32_t UseMouse;
-        int32_t RunMode;
-        int32_t AutoAim;
-        int32_t ShowOpponentWeapons;
-        int32_t MouseDeadZone,MouseBias;
-        int32_t SmoothInput;
-
-        // JBF 20031211: Store the input settings because
-        // (currently) jmact can't regurgitate them
-        int32_t MouseFunctions[MAXMOUSEBUTTONS][2];
-        int32_t MouseDigitalFunctions[MAXMOUSEAXES][2];
-        int32_t MouseAnalogueAxes[MAXMOUSEAXES];
-        int32_t MouseAnalogueScale[MAXMOUSEAXES];
-        int32_t JoystickFunctions[MAXJOYBUTTONS][2];
-        int32_t JoystickDigitalFunctions[MAXJOYAXES][2];
-        int32_t JoystickAnalogueAxes[MAXJOYAXES];
-        int32_t JoystickAnalogueScale[MAXJOYAXES];
-        int32_t JoystickAnalogueDead[MAXJOYAXES];
-        int32_t JoystickAnalogueSaturate[MAXJOYAXES];
-        uint8_t KeyboardKeys[NUMGAMEFUNCTIONS][2];
-
-        //
-        // Sound variables
-        //
-        int32_t FXDevice;
-        int32_t MusicDevice;
-        int32_t FXVolume;
-        int32_t MusicVolume;
-        int32_t SoundToggle;
-        int32_t MusicToggle;
-        int32_t VoiceToggle;
-        int32_t AmbienceToggle;
-
-        int32_t NumVoices;
-        int32_t NumChannels;
-        int32_t NumBits;
-        int32_t MixRate;
-
-        int32_t ReverseStereo;
-
-        //
-        // Screen variables
-        //
-
-        int32_t ScreenMode;
-
-        int32_t ScreenWidth;
-        int32_t ScreenHeight;
-        int32_t ScreenBPP;
-
-        int32_t ForceSetup;
-        int32_t NoAutoLoad;
-
-        int32_t scripthandle;
-        int32_t setupread;
-
-        int32_t CheckForUpdates;
-        int32_t LastUpdateCheck;
-        int32_t useprecache;
-    } config_t;
-
-    typedef struct {
-        int32_t camerax,cameray,cameraz;
+        vec3_t camera;
         int32_t const_visibility,uw_framerate;
         int32_t camera_time,folfvel,folavel,folx,foly,fola;
         int32_t reccnt,crosshairscale;
@@ -407,6 +363,69 @@ extern "C" {
         int16_t camerasprite,last_camsprite;
         int16_t last_level,secretlevel;
 
+        struct {
+            int32_t UseJoystick;
+            int32_t UseMouse;
+            int32_t RunMode;
+            int32_t AutoAim;
+            int32_t ShowOpponentWeapons;
+            int32_t MouseDeadZone,MouseBias;
+            int32_t SmoothInput;
+
+            // JBF 20031211: Store the input settings because
+            // (currently) jmact can't regurgitate them
+            int32_t MouseFunctions[MAXMOUSEBUTTONS][2];
+            int32_t MouseDigitalFunctions[MAXMOUSEAXES][2];
+            int32_t MouseAnalogueAxes[MAXMOUSEAXES];
+            int32_t MouseAnalogueScale[MAXMOUSEAXES];
+            int32_t JoystickFunctions[MAXJOYBUTTONS][2];
+            int32_t JoystickDigitalFunctions[MAXJOYAXES][2];
+            int32_t JoystickAnalogueAxes[MAXJOYAXES];
+            int32_t JoystickAnalogueScale[MAXJOYAXES];
+            int32_t JoystickAnalogueDead[MAXJOYAXES];
+            int32_t JoystickAnalogueSaturate[MAXJOYAXES];
+            uint8_t KeyboardKeys[NUMGAMEFUNCTIONS][2];
+
+            //
+            // Sound variables
+            //
+            int32_t FXDevice;
+            int32_t MusicDevice;
+            int32_t FXVolume;
+            int32_t MusicVolume;
+            int32_t SoundToggle;
+            int32_t MusicToggle;
+            int32_t VoiceToggle;
+            int32_t AmbienceToggle;
+
+            int32_t NumVoices;
+            int32_t NumChannels;
+            int32_t NumBits;
+            int32_t MixRate;
+
+            int32_t ReverseStereo;
+
+            //
+            // Screen variables
+            //
+
+            int32_t ScreenMode;
+
+            int32_t ScreenWidth;
+            int32_t ScreenHeight;
+            int32_t ScreenBPP;
+
+            int32_t ForceSetup;
+            int32_t NoAutoLoad;
+
+            int32_t scripthandle;
+            int32_t setupread;
+
+            int32_t CheckForUpdates;
+            int32_t LastUpdateCheck;
+            int32_t useprecache;
+        } config;
+
         char overhead_on,last_overhead,showweapons;
         char god,warp_on,cashman,eog,showallmap;
         char show_help,scrollmode,clipping;
@@ -415,8 +434,6 @@ extern "C" {
         char pwlockout[128],rtsname[128];
         char display_bonus_screen;
         char show_level_text;
-
-        config_t config;
     } user_defs;
 
     typedef struct {
@@ -433,9 +450,9 @@ extern "C" {
 // mywhatever type globals
 
     typedef struct {
-        int32_t posx, posy, posz, horiz, ohoriz, ohorizoff, invdisptime;
-        int32_t bobposx, bobposy, oposx, oposy, oposz, pyoff, opyoff;
-        int32_t posxv, posyv, poszv, last_pissed_time, truefz, truecz;
+        int32_t posx, posy, posz, oposx, oposy, oposz, posxv, posyv, poszv;
+        int32_t bobposx, bobposy, pyoff, opyoff, invdisptime;
+        int32_t last_pissed_time, truefz, truecz;
         int32_t player_par, visibility;
         int32_t bobcounter, weapon_sway;
         int32_t pals_time, randomflamex, crack_time;
@@ -456,26 +473,25 @@ extern "C" {
         int16_t sbs, sound_pitch;
 
         int16_t ang, oang, angvel, cursectnum, look_ang, last_extra, subweapon;
-        int16_t ammo_amount[MAX_WEAPONS], wackedbyactor, frag, fraggedself;
+        int16_t ammo_amount[MAX_WEAPONS], inv_amount[GET_MAX], wackedbyactor, frag, fraggedself;
 
-        int16_t curr_weapon, last_weapon, tipincs, horizoff, wantweaponfire;
-        int16_t holoduke_amount, newowner, hurt_delay, hbomb_hold_delay;
+        int16_t curr_weapon, last_weapon, tipincs, horiz, horizoff, ohoriz, ohorizoff, wantweaponfire;
+        int16_t newowner, hurt_delay, hbomb_hold_delay;
         int16_t jumping_counter, airleft, knee_incs, access_incs;
         int16_t fta, ftq, access_wallnum, access_spritenum;
-        int16_t kickback_pic, got_access, weapon_ang, firstaid_amount;
+        int16_t kickback_pic, got_access, weapon_ang;
         int16_t somethingonplayer, on_crane, i, one_parallax_sectnum;
         int16_t over_shoulder_on, random_club_frame, fist_incs;
         int16_t one_eighty_count, cheat_phase;
         int16_t dummyplayersprite, extra_extra8, quick_kick, last_quick_kick;
-        int16_t heat_amount, actorsqu, timebeforeexit, customexitsound;
+        int16_t actorsqu, timebeforeexit, customexitsound;
 
         int16_t weaprecs[16], weapreccnt;
 
 
         int16_t orotscrnang, rotscrnang, dead_flag, show_empty_weapon;   // JBF 20031220: added orotscrnang
-        int16_t scuba_amount, jetpack_amount, steroids_amount, shield_amount;
         int16_t holoduke_on, pycount, weapon_pos, frag_ps;
-        int16_t transporter_hold, last_full_weapon, footprintshade, boot_amount;
+        int16_t transporter_hold, last_full_weapon, footprintshade;
 
         char aim_mode, auto_aim, weaponswitch;
 
@@ -497,7 +513,7 @@ extern "C" {
         int16_t redneck_gut, redneck_alcohol, redneck_counter;
     } DukePlayer_t;
 
-    extern char tempbuf[2048], packbuf[576], menutextbuf[128];
+    extern char tempbuf[2048], packbuf[4096], menutextbuf[128];
 
     extern int32_t g_spriteGravity;
 
@@ -530,34 +546,50 @@ extern "C" {
     extern int16_t camsprite;
 
     typedef struct {
-        int32_t workslike, extra, cstat, extra_rand, hitradius, range, flashcolor;
-        int16_t spawns, sound, isound, vel, decal, trail, tnum, drop, clipdist, offset, bounces, bsound, toffset;
-        int8_t sxrepeat, syrepeat, txrepeat, tyrepeat, shade, xrepeat, yrepeat, pal, velmult;
+        int32_t workslike, extra, cstat, extra_rand; // 16b
+        int32_t hitradius, range, flashcolor; // 12b
+        int16_t spawns, sound, isound, vel; // 8b
+        int16_t decal, trail, tnum, drop; // 8b
+        int16_t clipdist, offset, bounces, bsound; // 8b
+        int16_t toffset; // 2b
+        int8_t sxrepeat, syrepeat, txrepeat, tyrepeat; // 4b
+        int8_t shade, xrepeat, yrepeat, pal; // 4b
+        int8_t velmult, filler; // 2b
     } projectile_t;
 
-// extern char gotz;
-
     typedef struct {
-        /*    int32_t x;
-            int32_t y;
-            int32_t z; */
-        int16_t ang, oldang, angdir, angdif;
-    } spriteinterpolate;
+        intptr_t temp_data[10]; // 40b/80b sometimes used to hold pointers to con code
 
-    spriteinterpolate sprpos[MAXSPRITES];
+        int16_t picnum,ang,extra,owner; //8b
+        int16_t movflag,tempang,timetosleep; //6b
 
-    typedef struct {
-        int32_t bposx,bposy,bposz;
-        int32_t floorz,ceilingz,lastvx,lastvy;
-        int32_t flags;
-        intptr_t temp_data[10]; // sometimes used to hold pointers to con code
-        int16_t picnum,ang,extra,owner,movflag;
-        int16_t tempang,actorstayput,dispicnum;
-        int16_t timetosleep;
-        char cgg;
-        char filler;
-        projectile_t projectile;
+        int32_t flags, bposx,bposy,bposz; //16b
+        int32_t floorz,ceilingz,lastvx,lastvy; //16b
+        int32_t lasttransport; //4b
+
+        int16_t lightId, lightcount, lightmaxrange, cgg; //8b
+        int16_t actorstayput, dispicnum, shootzvel; // 6b
+
+#ifdef POLYMER
+        _prlight *lightptr; //4b/8b
+#else
+        void *lightptr;
+#endif
+
+        projectile_t *projectile; //4b/8b
+
+        int8_t filler[16]; // pad struct to 128 bytes
     } ActorData_t;
+
+// this struct needs to match the beginning of ActorData_t above
+    typedef struct {
+        intptr_t temp_data[10]; // 40b/80b sometimes used to hold pointers to con code
+
+        int16_t picnum,ang,extra,owner; //8b
+        int16_t movflag,tempang,timetosleep; // 6b
+
+        int32_t flags; // 4b
+    } NetActorData_t;
 
     extern ActorData_t ActorExtra[MAXSPRITES];
 
@@ -627,17 +659,12 @@ extern "C" {
 
     extern int32_t g_lastSaveSlot;
     extern int32_t g_restorePalette;
-#ifndef RANCID_NETWORKING
-    extern int32_t packetrate;
-#endif
 
     extern int32_t cachecount;
     extern char boardfilename[BMAX_PATH];
-    extern uint8_t waterpal[768],slimepal[768],titlepal[768],drealms[768],endingpal[768],animpal[768];
+    extern uint8_t waterpal[768],slimepal[768],titlepal[768],drealms[768],endingpal[768],*animpal;
     extern char currentboardfilename[BMAX_PATH];
     extern char cachedebug,g_earthquakeTime;
-// 0: master/slave, 1: peer-to-peer
-    extern int32_t g_networkBroadcastMode;
     extern char lumplockbyte[11];
 
 //DUKE3D.H - replace the end "my's" with this
@@ -654,19 +681,21 @@ extern "C" {
     extern int16_t BlimpSpawnSprites[15];
 
 //DUKE3D.H:
+
+#pragma pack(pop)
     typedef struct {
-        int16_t got_access, last_extra, shield_amount, curr_weapon, holoduke_on;
-        int16_t firstaid_amount, steroids_amount, holoduke_amount, jetpack_amount;
-        int16_t heat_amount, scuba_amount, boot_amount;
+        int16_t got_access, last_extra, inv_amount[GET_MAX], curr_weapon, holoduke_on;
         int16_t last_weapon, weapon_pos, kickback_pic;
         int16_t ammo_amount[MAX_WEAPONS], frag[MAXPLAYERS];
         char inven_icon, jetpack_on, heat_on, gotweapon[MAX_WEAPONS];
-    } STATUSBARTYPE;
+    } DukeStatus_t;
+#pragma pack(push,1)
 
-    extern STATUSBARTYPE sbar;
+    extern DukeStatus_t sbar;
     extern int32_t g_cameraDistance, g_cameraClock, g_playerFriction,g_showShareware;
-    extern int32_t g_networkBroadcastMode, g_movesPerPacket;
     extern int32_t g_gameQuit;
+
+    extern int32_t playerswhenstarted;
 
     extern char pus,pub;
     extern int32_t g_damageCameras,g_BUZSAWrSelfDamage,g_tripbombLaserMode;
@@ -685,6 +714,7 @@ extern "C" {
     extern int32_t mymaxlag, otherminlag, bufferjitter;
 
     extern int32_t g_numInterpolations, startofdynamicinterpolations;
+    extern int32_t g_interpolationLock;
     extern int32_t oldipos[MAXINTERPOLATIONS];
     extern int32_t bakipos[MAXINTERPOLATIONS];
     extern int32_t *curipos[MAXINTERPOLATIONS];
@@ -821,6 +851,7 @@ extern "C" {
         GAMEVAR_CHARPTR    = 0x00010000, // plValues is a pointer to a char
         GAMEVAR_NORESET    = 0x00020000, // var values are not reset when restoring map state
         GAMEVAR_SPECIAL    = 0x00040000, // flag for structure member shortcut vars
+        GAMEVAR_NOMULTI    = 0x00080000, // don't attach to multiplayer packets
     };
 
     enum GamearrayFlags_t {
@@ -836,15 +867,15 @@ extern "C" {
             intptr_t *plValues;     // array of values when 'per-player', or 'per-actor'
         } val;
         intptr_t lDefault;
-        uint32_t dwFlags;
+        uintptr_t dwFlags;
         char *szLabel;
     } gamevar_t;
 
     typedef struct {
         char *szLabel;
         int32_t *plValues;     // array of values
-        int32_t size;
-        char bReset;
+        intptr_t size;
+        intptr_t bReset;
     } gamearray_t;
 
     extern gamevar_t aGameVars[MAXGAMEVARS];
@@ -863,6 +894,9 @@ extern "C" {
         SPRITE_BADGUY       = 32,
         SPRITE_NOPAL        = 64,
         SPRITE_NOEVENTCODE  = 128,
+        SPRITE_NOLIGHT      = 256,
+        SPRITE_USEACTIVATOR = 512,
+        SPRITE_NULL         = 1024, // null sprite in multiplayer
     };
 
     extern int16_t SpriteCacheList[MAXTILES][3];
@@ -881,7 +915,7 @@ extern "C" {
 
     extern char g_szBuf[1024];
 
-#define NAM_GRENADE_LIFETIME    120
+#define NAM_GRENADE_LIFETIME        120
 #define NAM_GRENADE_LIFETIME_VAR    30
 
     extern intptr_t *aplWeaponClip[MAX_WEAPONS];            // number of items in clip
@@ -954,10 +988,12 @@ extern "C" {
         PROJECTILE_RPG_IMPACT          = 32768,
         PROJECTILE_RADIUS_PICNUM       = 65536,
         PROJECTILE_ACCURATE_AUTOAIM    = 131072,
-        PROJECTILE_FORCEIMPACT         = 262144
+        PROJECTILE_FORCEIMPACT         = 262144,
+        PROJECTILE_REALCLIPDIST        = 524288,
+        PROJECTILE_ACCURATE            = 1048576,
     };
 
-    extern projectile_t ProjectileData[MAXTILES], DefaultProjectileData[MAXTILES];
+    extern projectile_t ProjectileData[MAXTILES], DefaultProjectileData[MAXTILES], SpriteProjectile[MAXSPRITES];
 
 // logo control
 
@@ -992,44 +1028,50 @@ extern "C" {
     typedef struct {
 // this needs to have a copy of everything related to the map/actor state
 // see savegame.c
-        int16_t numwalls;
-        walltype wall[MAXWALLS];
-        int16_t numsectors;
-        sectortype sector[MAXSECTORS];
-        spritetype sprite[MAXSPRITES];
-        spriteext_t spriteext[MAXSPRITES];
-        int16_t headspritesect[MAXSECTORS+1];
-        int16_t prevspritesect[MAXSPRITES];
-        int16_t nextspritesect[MAXSPRITES];
-        int16_t headspritestat[MAXSTATUS+1];
-        int16_t prevspritestat[MAXSPRITES];
-        int16_t nextspritestat[MAXSPRITES];
-        int16_t g_numCyclers;
-        int16_t cyclers[MAXCYCLERS][6];
-        PlayerSpawn_t g_playerSpawnPoints[MAXPLAYERS];
-        int16_t g_numAnimWalls;
-        int16_t SpriteDeletionQueue[1024],g_spriteDeleteQueuePos;
-        animwalltype animwall[MAXANIMWALLS];
-        int32_t msx[2048], msy[2048];
-        int16_t g_mirrorWall[64], g_mirrorSector[64], g_mirrorCount;
-        uint8_t show2dsector[(MAXSECTORS+7)>>3];
-        int16_t g_numClouds,clouds[128],cloudx[128],cloudy[128];
-        ActorData_t ActorExtra[MAXSPRITES];
-        int16_t pskyoff[MAXPSKYTILES], pskybits;
         int32_t animategoal[MAXANIMATES], animatevel[MAXANIMATES], g_animateCount;
-        int16_t animatesect[MAXANIMATES];
         int32_t animateptr[MAXANIMATES];
-        uint8_t g_numPlayerSprites;
-        uint8_t g_earthquakeTime;
         int32_t lockclock;
+        int32_t msx[2048], msy[2048];
         int32_t randomseed, g_globalRandom;
-        uint8_t scriptptrs[MAXSPRITES];
         intptr_t *vars[MAXGAMEVARS];
+
+        int16_t SpriteDeletionQueue[1024],g_spriteDeleteQueuePos;
+        int16_t animatesect[MAXANIMATES];
+        int16_t cyclers[MAXCYCLERS][6];
+        int16_t g_mirrorWall[64], g_mirrorSector[64], g_mirrorCount;
+        int16_t g_numAnimWalls;
+        int16_t g_numClouds,clouds[128],cloudx[128],cloudy[128];
+        int16_t g_numCyclers;
+        int16_t headspritesect[MAXSECTORS+1];
+        int16_t headspritestat[MAXSTATUS+1];
+        int16_t nextspritesect[MAXSPRITES];
+        int16_t nextspritestat[MAXSPRITES];
+        int16_t numsectors;
+        int16_t numwalls;
+        int16_t prevspritesect[MAXSPRITES];
+        int16_t prevspritestat[MAXSPRITES];
+        int16_t pskyoff[MAXPSKYTILES], pskybits;
+
+        uint8_t g_earthquakeTime;
+        uint8_t g_numPlayerSprites;
+        uint8_t scriptptrs[MAXSPRITES];
+        uint8_t show2dsector[(MAXSECTORS+7)>>3];
+
+        ActorData_t ActorExtra[MAXSPRITES];
+        PlayerSpawn_t g_playerSpawnPoints[MAXPLAYERS];
+        animwalltype animwall[MAXANIMWALLS];
+        sectortype sector[MAXSECTORS];
+        spriteext_t spriteext[MAXSPRITES];
+        spritetype sprite[MAXSPRITES];
+        walltype wall[MAXWALLS];
     } mapstate_t;
+
+    extern void G_SaveMapState(mapstate_t *save);
+    extern void G_RestoreMapState(mapstate_t *save);
 
     typedef struct {
         int32_t partime, designertime;
-        char *name, *filename, *musicfn, *musicfn1;
+        char *name, *filename, *musicfn, *alt_musicfn;
         mapstate_t *savedstate;
     } map_t;
 
@@ -1039,7 +1081,8 @@ extern "C" {
         DukePlayer_t *ps;
         input_t *sync;
 
-        int32_t movefifoend, syncvalhead, myminlag;
+        int32_t movefifoend, syncvalhead;
+        int16_t ping, filler;
         int32_t pcolor, pteam, frags[MAXPLAYERS], wchoice[MAX_WEAPONS];
 
         char vote, gotvote, playerreadyflag, playerquitflag;
@@ -1061,8 +1104,8 @@ extern "C" {
     extern keydef_t ConsoleKeys[];
     extern char *ConsoleButtons[];
 
-    extern char *duke3dgrp, *duke3dgrpstring;
-    extern char mod_dir[BMAX_PATH];
+    extern char *g_grpNamePtr, *g_gameNamePtr;
+    extern char g_modDir[BMAX_PATH];
 
     extern hashtable_t gamevarH;
     extern hashtable_t arrayH;
@@ -1073,32 +1116,42 @@ extern "C" {
     {
         PACKET_MASTER_TO_SLAVE,
         PACKET_SLAVE_TO_MASTER,
-        PACKET_BROADCAST,
-        SERVER_GENERATED_BROADCAST,
+
+        PACKET_NUM_PLAYERS,
+        PACKET_PLAYER_INDEX,
+        PACKET_PLAYER_DISCONNECTED,
+        PACKET_PLAYER_SPAWN,
+        PACKET_FRAG,
+        PACKET_REQUEST_GAMESTATE,
+        PACKET_LOAD_GAME,
         PACKET_VERSION,
+        PACKET_AUTH,
+        PACKET_PLAYER_READY,
 
-        /* don't change anything above this line */
+        // any packet with an ID higher than PACKET_BROADCAST is rebroadcast by server
+        // this is so hacked clients can't create fake server packets and get the server
+        // to send them to everyone
 
-        PACKET_MESSAGE,
-
+        PACKET_BROADCAST,
         PACKET_NEW_GAME,
         PACKET_RTS,
-        PACKET_MENU_LEVEL_QUIT,
-        PACKET_WEAPON_CHOICE,
-        PACKET_PLAYER_OPTIONS,
-        PACKET_PLAYER_NAME,
-
+        PACKET_CLIENT_INFO,
+        PACKET_MESSAGE,
         PACKET_USER_MAP,
 
         PACKET_MAP_VOTE,
         PACKET_MAP_VOTE_INITIATE,
         PACKET_MAP_VOTE_CANCEL,
-
-        PACKET_LOAD_GAME,
-        PACKET_NULL_PACKET,
-        PACKET_PLAYER_READY,
-        PACKET_QUIT = 255 // should match mmulti I think
     };
+
+    enum NetDisconnect_t
+    {
+        DISC_BAD_PASSWORD = 1,
+        DISC_KICKED,
+        DISC_BANNED
+    };
+
+#pragma pack(pop)
 
 #ifdef __cplusplus
 }

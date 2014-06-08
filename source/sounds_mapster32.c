@@ -29,23 +29,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <stdio.h>
 #include <string.h>
 
+#include "compat.h"
+
 #include "fx_man.h"
 //#include "music.h"
 //#include "duke3d.h"
-//#include "util_lib.h"
+#include "util_lib.h"
 #include "osd.h"
 
-//#include "compat.h"
 #include "cache1d.h"
 #include "macros.h"
 #include "mathutil.h"
 #include "build.h"  // vec3_t
-
-#ifdef _WIN32
-#ifdef USE_OPENAL
-#include "openal.h"
-#endif
-#endif
 
 #include "sounds_mapster32.h"
 
@@ -53,15 +48,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MUSICANDSFX 5
 
 static char SM32_havesound = 0;
-extern sound_t g_sounds[MAXSOUNDS];
+
 char SoundToggle = 1;
 int32_t NumVoices = 32;
 
 int32_t backflag,g_numEnvSoundsPlaying;
 
-void MUSIC_Update(void) {}  // needed when linking
 
-void S_TestSoundCallback(uint32_t);
+
+void S_Callback(uint32_t);
 extern void initprintf(const char *f, ...);
 
 /*
@@ -72,8 +67,11 @@ extern void initprintf(const char *f, ...);
 ===================
 */
 
+
 int32_t S_SoundStartup(void) {
-    int32_t status, err = 0;
+    int32_t status;
+    int32_t fxdevicetype;
+    void * initdata = 0;
 
     // TODO: read config
     int32_t FXVolume=220, /*NumVoices=32,*/ NumChannels=2, NumBits=16, MixRate, ReverseStereo=0;
@@ -82,39 +80,26 @@ int32_t S_SoundStartup(void) {
 #else
     MixRate = 48000;
 #endif
+    fxdevicetype = ASS_AutoDetect;
 
-    // if they chose None lets return
-    if (0) return -1;  // TODO: read config
+#ifdef WIN32
+    initdata = (void *) win_gethwnd();
+#endif
 
-RETRY:
-    status = FX_Init(0, NumVoices, NumChannels, NumBits, MixRate);
+    status = FX_Init(fxdevicetype, NumVoices, NumChannels, NumBits, MixRate, initdata);
     if (status == FX_Ok) {
         FX_SetVolume(FXVolume);
-        if (ReverseStereo == 1) {
-            FX_SetReverseStereo(!FX_GetReverseStereo());
-        }
-        status = FX_SetCallBack(S_TestSoundCallback);
+        FX_SetReverseStereo(ReverseStereo);
+        status = FX_SetCallBack(S_Callback);
     }
 
     if (status != FX_Ok) {
-        if (!err) {
-#if defined(_WIN32)
-            MixRate = 44100;
-#else
-            MixRate = 48000;
-#endif
-            NumBits = 16;
-            NumChannels = 2;
-            NumVoices = 32;
-            ReverseStereo = 0;
-            err = 1;
-            goto RETRY;
-        }
         initprintf("Sound startup error: %s", FX_ErrorString(FX_Error));
         return -2;
     }
 
     SM32_havesound = 1;
+
     return 0;
 }
 
@@ -169,7 +154,7 @@ int32_t S_LoadSound(uint32_t num) {
 extern vec3_t pos;
 extern int16_t ang, cursectnum;
 
-int32_t S_PlaySoundXYZ(int32_t num, int32_t i, const vec3_t *pos) {
+int32_t S_PlaySound3D(int32_t num, int32_t i, const vec3_t *pos) {
     int32_t sndist, cx, cy, cz, j/*,k*/;
     int32_t pitche,pitchs,cs;
     int32_t voice, sndang, ca, pitch;
@@ -264,31 +249,15 @@ int32_t S_PlaySoundXYZ(int32_t num, int32_t i, const vec3_t *pos) {
         sndist = ((255-LOUDESTVOLUME)<<6);
 
     if (g_sounds[num].m&1) {
-        uint16_t start;
-
         if (g_sounds[num].num > 0) return -1;
 
-        start = *(uint16_t *)(g_sounds[num].ptr + 0x14);
-
-        if (*g_sounds[num].ptr == 'C')
-            voice = FX_PlayLoopedVOC(g_sounds[num].ptr, start, start + g_sounds[num].soundsiz,
-                                     pitch,sndist>>6,sndist>>6,0,g_sounds[num].pr,num);
-        else if (*g_sounds[num].ptr == 'O')
-            voice = FX_PlayLoopedOGG(g_sounds[num].ptr, start, start + g_sounds[num].soundsiz,
-                                     pitch,sndist>>6,sndist>>6,0,g_sounds[num].pr,num);
-        else
-            voice = FX_PlayLoopedWAV(g_sounds[num].ptr, start, start + g_sounds[num].soundsiz,
-                                     pitch,sndist>>6,sndist>>6,0,g_sounds[num].pr,num);
+        voice = FX_PlayLoopedAuto(g_sounds[num].ptr, g_sounds[num].soundsiz, 0, -1,
+                                  pitch,sndist>>6,sndist>>6,0,g_sounds[num].pr,num);
     } else {
-        if (*g_sounds[num].ptr == 'C')
-            voice = FX_PlayVOC3D(g_sounds[ num ].ptr,pitch,sndang>>6,sndist>>6, g_sounds[num].pr, num);
-        else if (*g_sounds[num].ptr == 'O')
-            voice = FX_PlayOGG3D(g_sounds[ num ].ptr,pitch,sndang>>6,sndist>>6, g_sounds[num].pr, num);
-        else
-            voice = FX_PlayWAV3D(g_sounds[ num ].ptr,pitch,sndang>>6,sndist>>6, g_sounds[num].pr, num);
+        voice = FX_PlayAuto3D(g_sounds[ num ].ptr, g_sounds[num].soundsiz, pitch,sndang>>4,sndist>>6, g_sounds[num].pr, num);
     }
 
-    if (voice > FX_Ok) {
+    if (voice >= FX_Ok) {
         g_sounds[num].SoundOwner[g_sounds[num].num].i = i;
         g_sounds[num].SoundOwner[g_sounds[num].num].voice = voice;
         g_sounds[num].num++;
@@ -299,7 +268,6 @@ int32_t S_PlaySoundXYZ(int32_t num, int32_t i, const vec3_t *pos) {
 void S_PlaySound(int32_t num) {
     int32_t pitch,pitche,pitchs,cx;
     int32_t voice;
-    int32_t start;
 
     if (!SM32_havesound) return;
     if (SoundToggle==0) return;
@@ -329,29 +297,13 @@ void S_PlaySound(int32_t num) {
     }
 
     if (g_sounds[num].m&1) {
-        if (*g_sounds[num].ptr == 'C') {
-            start = (int32_t)*(uint16_t *)(g_sounds[num].ptr + 0x14);
-            voice = FX_PlayLoopedVOC(g_sounds[num].ptr, start, start + g_sounds[num].soundsiz,
-                                     pitch,LOUDESTVOLUME,LOUDESTVOLUME,LOUDESTVOLUME,g_sounds[num].pr,num);
-        } else if (*g_sounds[num].ptr == 'O') {
-            start = (int32_t)*(uint16_t *)(g_sounds[num].ptr + 0x14);
-            voice = FX_PlayLoopedOGG(g_sounds[num].ptr, start, start + g_sounds[num].soundsiz,
-                                     pitch,LOUDESTVOLUME,LOUDESTVOLUME,LOUDESTVOLUME,g_sounds[num].pr,num);
-        } else {
-            start = (int32_t)*(uint16_t *)(g_sounds[num].ptr + 0x14);
-            voice = FX_PlayLoopedWAV(g_sounds[num].ptr, start, start + g_sounds[num].soundsiz,
-                                     pitch,LOUDESTVOLUME,LOUDESTVOLUME,LOUDESTVOLUME,g_sounds[num].pr,num);
-        }
+        voice = FX_PlayLoopedAuto(g_sounds[num].ptr, g_sounds[num].soundsiz, 0, -1,
+                                  pitch,LOUDESTVOLUME,LOUDESTVOLUME,LOUDESTVOLUME,g_sounds[num].soundsiz,num);
     } else {
-        if (*g_sounds[num].ptr == 'C')
-            voice = FX_PlayVOC3D(g_sounds[ num ].ptr, pitch,0,255-LOUDESTVOLUME,g_sounds[num].pr, num);
-        else if (*g_sounds[num].ptr == 'O')
-            voice = FX_PlayOGG3D(g_sounds[ num ].ptr, pitch,0,255-LOUDESTVOLUME,g_sounds[num].pr, num);
-        else
-            voice = FX_PlayWAV3D(g_sounds[ num ].ptr, pitch,0,255-LOUDESTVOLUME,g_sounds[num].pr, num);
+        voice = FX_PlayAuto3D(g_sounds[ num ].ptr, g_sounds[num].soundsiz, pitch,0,255-LOUDESTVOLUME,g_sounds[num].pr, num);
     }
 
-    if (voice > FX_Ok) { // return;
+    if (voice >= FX_Ok) { // return;
         g_sounds[num].SoundOwner[g_sounds[num].num].voice = voice;
         g_sounds[num].num++;
         return;
@@ -366,19 +318,14 @@ int32_t A_PlaySound(uint32_t num, int32_t i) {
         return 0;
     }
 
-    return S_PlaySoundXYZ(num,i, (vec3_t *)&sprite[i]);
-}
-
-void A_StopSound(int32_t num, int32_t i) {
-    UNREFERENCED_PARAMETER(i);
-    if (num >= 0 && num < MAXSOUNDS) S_StopSound(num);
+    return S_PlaySound3D(num,i, (vec3_t *)&sprite[i]);
 }
 
 void S_StopSound(int32_t num) {
     if (num >= 0 && num < MAXSOUNDS)
         if (g_sounds[num].num > 0) {
             FX_StopSound(g_sounds[num].SoundOwner[g_sounds[num].num-1].voice);
-            S_TestSoundCallback(num);
+            S_Callback(num);
         }
 }
 
@@ -452,11 +399,11 @@ void S_Pan3D(void) {
             if (sndist < ((255-LOUDESTVOLUME)<<6))
                 sndist = ((255-LOUDESTVOLUME)<<6);
 
-            FX_Pan3D(g_sounds[j].SoundOwner[k].voice,sndang>>6,sndist>>6);
+            FX_Pan3D(g_sounds[j].SoundOwner[k].voice,sndang>>4,sndist>>6);
         }
 }
 
-void S_TestSoundCallback(uint32_t num) {
+void S_Callback(uint32_t num) {
     int32_t i,j,k;
 
     k = g_sounds[num].num;
@@ -499,7 +446,7 @@ int32_t A_CheckSoundPlaying(int32_t i, int32_t num) {
 
 int32_t S_CheckSoundPlaying(int32_t i, int32_t num) {
     if (i == -1) {
-        if (g_sounds[num].lock == 200)
+        if (g_sounds[num].lock >= 200)
             return 1;
         return 0;
     }

@@ -561,18 +561,20 @@ void CONFIG_SetupJoystick(void) {
 =
 ===================
 */
-extern char *duke3dgrp;
+extern char *g_grpNamePtr;
 extern void G_CheckPlayerColor(int32_t *color,int32_t prev_color);
 extern palette_t CrosshairColors;
 extern palette_t DefaultCrosshairColors;
-extern char mod_dir[BMAX_PATH];
+extern char g_modDir[BMAX_PATH];
 extern int32_t r_maxfps;
 extern int32_t g_noSetup;
+extern int32_t demorec_diffs_cvar, demoplay_diffs;
+extern int32_t demorec_difftics_cvar, demorec_diffcompress_cvar, demorec_synccompress_cvar;
 
 int32_t CONFIG_ReadSetup(void) {
     int32_t dummy, i = 0;
     char commmacro[] = "CommbatMacro# ";
-    extern int32_t CommandWeaponChoice;
+    extern int32_t g_forceWeaponChoice;
     char tempbuf[1024];
 
     CONTROL_ClearAssignments();
@@ -618,34 +620,28 @@ int32_t CONFIG_ReadSetup(void) {
 
         SCRIPT_GetString(ud.config.scripthandle, "Comm Setup","RTSName",&ud.rtsname[0]);
 
-#ifndef RANCID_NETWORKING
-        // The packetrate mechanism is specific to the eduke32 networking code
-        SCRIPT_GetNumber(ud.config.scripthandle, "Comm Setup", "Rate",(int32_t *)&packetrate);
-        packetrate = min(max(packetrate,50),1000);
-#endif
-
         SCRIPT_GetNumber(ud.config.scripthandle, "Setup","ConfigVersion",&ud.configversion);
         SCRIPT_GetNumber(ud.config.scripthandle, "Setup","ForceSetup",&ud.config.ForceSetup);
         SCRIPT_GetNumber(ud.config.scripthandle, "Setup","NoAutoLoad",&ud.config.NoAutoLoad);
 
-#ifdef _WIN32
-        if (g_noSetup == 0 && mod_dir[0] == '/') {
+// #ifdef _WIN32
+        if (g_noSetup == 0 && g_modDir[0] == '/') {
             struct stat st;
-            SCRIPT_GetString(ud.config.scripthandle, "Setup","ModDir",&mod_dir[0]);
+            SCRIPT_GetString(ud.config.scripthandle, "Setup","ModDir",&g_modDir[0]);
 
-            if (stat(mod_dir, &st) >= 0) {
+            if (stat(g_modDir, &st)) {
                 if ((st.st_mode & S_IFDIR) != S_IFDIR) {
                     initprintf("Invalid mod dir in cfg!\n");
-                    Bsprintf(mod_dir,"/");
+                    Bsprintf(g_modDir,"/");
                 }
             }
         }
-#endif
+// #endif
 
         {
             extern char defaultduke3dgrp[BMAX_PATH];
             if (!Bstrcmp(defaultduke3dgrp,"duke3d.grp"))
-                SCRIPT_GetString(ud.config.scripthandle, "Setup","SelectedGRP",&duke3dgrp[0]);
+                SCRIPT_GetString(ud.config.scripthandle, "Setup","SelectedGRP",&g_grpNamePtr[0]);
         }
 
         {
@@ -660,7 +656,7 @@ int32_t CONFIG_ReadSetup(void) {
         SCRIPT_GetNumber(ud.config.scripthandle, "Screen Setup", "Detail",&ud.detail);
 
         {
-            extern int32_t g_frameDelay;
+            extern uint32_t g_frameDelay;
 
             SCRIPT_GetNumber(ud.config.scripthandle, "Screen Setup", "MaxFPS",&r_maxfps);
             r_maxfps = max(0,min(1000,r_maxfps));
@@ -746,7 +742,6 @@ int32_t CONFIG_ReadSetup(void) {
         SCRIPT_GetNumber(ud.config.scripthandle, "Screen Setup", "GLTextureQuality", &r_downsize);
         r_downsizevar = r_downsize;
         SCRIPT_GetNumber(ud.config.scripthandle, "Screen Setup", "GLUseCompressedTextureCache", &glusetexcache);
-        SCRIPT_GetNumber(ud.config.scripthandle, "Screen Setup", "GLUseTextureCacheCompression", &glusetexcachecompression);
         SCRIPT_GetNumber(ud.config.scripthandle, "Screen Setup", "GLUseTextureCompr", &glusetexcompr);
         SCRIPT_GetNumber(ud.config.scripthandle, "Screen Setup", "GLVBOCount", &r_vbocount);
         SCRIPT_GetNumber(ud.config.scripthandle, "Screen Setup", "GLVBOs", &r_vbos);
@@ -835,8 +830,21 @@ int32_t CONFIG_ReadSetup(void) {
         SCRIPT_GetNumber(ud.config.scripthandle, "Misc", "WeaponScale",&ud.weaponscale);
         SCRIPT_GetNumber(ud.config.scripthandle, "Misc", "WeaponSway",&ud.weaponsway);
 
+        {
+            SCRIPT_GetNumber(ud.config.scripthandle, "Misc", "DemoRecDiffs",&demorec_diffs_cvar);
+            SCRIPT_GetNumber(ud.config.scripthandle, "Misc", "DemoRecDiffTics",&demorec_difftics_cvar);
+            SCRIPT_GetNumber(ud.config.scripthandle, "Misc", "DemoRecDiffCompress",&demorec_diffcompress_cvar);
+            SCRIPT_GetNumber(ud.config.scripthandle, "Misc", "DemoRecSyncCompress",&demorec_synccompress_cvar);
+            SCRIPT_GetNumber(ud.config.scripthandle, "Misc", "DemoPlayDiffs",&demoplay_diffs);
+            demorec_diffs_cvar = !!demorec_diffs_cvar;
+            demorec_difftics_cvar = min(max(2, demorec_difftics_cvar), 60*(TICRATE/TICSPERFRAME));
+            demorec_diffcompress_cvar = min(max(0, demorec_diffcompress_cvar), 1);
+            demorec_synccompress_cvar = min(max(0, demorec_synccompress_cvar), 1);
+            demoplay_diffs = !!demoplay_diffs;
+        }
+
         // weapon choices are defaulted in G_CheckCommandLine, which may override them
-        if (!CommandWeaponChoice)
+        if (!g_forceWeaponChoice)
             for (i=0; i<10; i++) {
                 Bsprintf(buf,"WeaponChoice%d",i);
                 dummy = -1;
@@ -1021,6 +1029,12 @@ void CONFIG_WriteSetup(void) {
     SCRIPT_PutNumber(ud.config.scripthandle, "Misc", "WeaponScale",ud.weaponscale,FALSE,FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Misc", "WeaponSway",ud.weaponsway,FALSE,FALSE);
 
+    SCRIPT_PutNumber(ud.config.scripthandle, "Misc", "DemoRecDiffs",demorec_diffs_cvar,FALSE,FALSE);
+    SCRIPT_PutNumber(ud.config.scripthandle, "Misc", "DemoRecDiffTics",demorec_difftics_cvar,FALSE,FALSE);
+    SCRIPT_PutNumber(ud.config.scripthandle, "Misc", "DemoRecDiffCompress",demorec_diffcompress_cvar,FALSE,FALSE);
+    SCRIPT_PutNumber(ud.config.scripthandle, "Misc", "DemoRecSyncCompress",demorec_synccompress_cvar,FALSE,FALSE);
+    SCRIPT_PutNumber(ud.config.scripthandle, "Misc", "DemoPlayDiffs",demoplay_diffs,FALSE,FALSE);
+
     SCRIPT_PutNumber(ud.config.scripthandle, "Setup","ConfigVersion",BYTEVERSION_JF,FALSE,FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Setup", "ForceSetup",ud.config.ForceSetup,FALSE,FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Setup", "NoAutoLoad",ud.config.NoAutoLoad,FALSE,FALSE);
@@ -1047,7 +1061,6 @@ void CONFIG_WriteSetup(void) {
     SCRIPT_PutNumber(ud.config.scripthandle, "Screen Setup", "GLTextureMode",gltexfiltermode,FALSE,FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Screen Setup", "GLTextureQuality", r_downsize,FALSE,FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Screen Setup", "GLUseCompressedTextureCache", glusetexcache,FALSE,FALSE);
-    SCRIPT_PutNumber(ud.config.scripthandle, "Screen Setup", "GLUseTextureCacheCompression", glusetexcachecompression,FALSE,FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Screen Setup", "GLUseTextureCompr",glusetexcompr,FALSE,FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Screen Setup", "GLVBOCount", r_vbocount,FALSE,FALSE);
     SCRIPT_PutNumber(ud.config.scripthandle, "Screen Setup", "GLVBOs", r_vbos,FALSE,FALSE);
@@ -1178,18 +1191,12 @@ void CONFIG_WriteSetup(void) {
     SCRIPT_PutString(ud.config.scripthandle, "Comm Setup","PlayerName",&szPlayerName[0]);
     SCRIPT_PutString(ud.config.scripthandle, "Comm Setup","RTSName",&ud.rtsname[0]);
 
-#ifndef RANCID_NETWORKING
-    // The packetrate mechanism is specific to the eduke32 networking code
-    SCRIPT_PutNumber(ud.config.scripthandle, "Comm Setup", "Rate", packetrate, FALSE, FALSE);
-#endif
+    SCRIPT_PutString(ud.config.scripthandle, "Setup","SelectedGRP",&g_grpNamePtr[0]);
 
-
-    SCRIPT_PutString(ud.config.scripthandle, "Setup","SelectedGRP",&duke3dgrp[0]);
-
-#ifdef _WIN32
+// #ifdef _WIN32
     if (g_noSetup == 0)
-        SCRIPT_PutString(ud.config.scripthandle, "Setup","ModDir",&mod_dir[0]);
-#endif
+        SCRIPT_PutString(ud.config.scripthandle, "Setup","ModDir",&g_modDir[0]);
+// #endif
 
     {
         char commmacro[] = "CommbatMacro# ";

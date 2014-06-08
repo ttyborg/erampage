@@ -1,5 +1,5 @@
 #
-# EDuke32 Makefile for GNU Make
+# erampage32 Makefile for GNU Make
 #
 
 # DEFINES
@@ -10,22 +10,26 @@ PRETTY_OUTPUT = 1
 # SDK locations - adjust to match your setup
 DXROOT=/directx/
 
-ALROOT		= AL
-
 # Engine options
 SUPERBUILD = 1
 POLYMOST = 1
+POLYMER = 1
 USE_OPENGL = 1
-NOASM = 0
+NOASM = 1
 LINKED_GTK = 0
 BUILD32_ON_64 = 0
-RANCID_NETWORKING = 1
 
 # Debugging/Build options
 RELEASE?=0
+DEBUGANYWAY?=0
+KRANDDEBUG?=0
 NOSOUND?=0
-USE_OPENAL	?= 1
 OPTLEVEL?=2
+PROFILER?=0
+
+ifneq (0,$(KRANDDEBUG))
+    RELEASE=0
+endif
 
 # Build locations
 SRC=source
@@ -42,11 +46,28 @@ ifneq (0,$(RELEASE))
   debug=-fomit-frame-pointer -funswitch-loops -O$(OPTLEVEL)
 else
 	# Debugging enabled
-  debug=-ggdb -O0 -DDEBUGGINGAIDS
+  debug=-g -O0 -DDEBUGGINGAIDS
+  ifneq (0,$(KRANDDEBUG))
+    debug+=-fno-inline -fno-inline-functions -fno-inline-functions-called-once
+    debug+=-DKRANDDEBUG=1
+  endif
 endif
+
+ifneq (0,$(DEBUGANYWAY))
+  debug+=-ggdb
+endif
+
+JAUDIOLIBDIR=$(SRC)/jaudiolib
+JAUDIOLIB=libjfaudiolib.a
+
+ENETDIR=$(SRC)/enet
+ENETLIB=libenet.a
 
 CC=gcc
 CXX=g++
+AS=nasm
+RC=windres --use-temp-file
+STRIP=strip
 
 GCC_MAJOR    := $(shell $(CC) -dumpversion 2>&1 | cut -d'.' -f1)
 GCC_MINOR    := $(shell $(CC) -dumpversion 2>&1 | cut -d'.' -f2)
@@ -63,11 +84,12 @@ ifeq (4,$(GCC_MAJOR))
 endif
 
 OURCFLAGS=$(debug) -W -Wall -Wimplicit -Werror-implicit-function-declaration \
-		-funsigned-char -fno-strict-aliasing -DNO_GCC_BUILTINS -DNOCOPYPROTECT \
-	    -I$(INC) -I$(EINC) -I$(SRC)/jmact -I$(SRC)/jaudiolib -D_FORTIFY_SOURCE=2 \
+	-funsigned-char -fno-strict-aliasing -DNO_GCC_BUILTINS \
+	-I$(INC) -I$(EINC) -I$(SRC)/jmact -I$(JAUDIOLIBDIR)/include -I$(ENETDIR)/include -D_FORTIFY_SOURCE=2 \
+	-fjump-tables -fno-stack-protector
 #        -march=pentium3 -mtune=generic -mmmx -m3dnow -msse -mfpmath=sse
 OURCXXFLAGS=-fno-exceptions -fno-rtti
-LIBS=-lm -ldl
+LIBS=-lm
 
 NASMFLAGS	= -s
 EXESUFFIX=
@@ -78,6 +100,9 @@ include $(EROOT)/Makefile.shared
 	    OBJ=obj_win
 	    EOBJ=eobj_win
     else
+        ifeq (1,$(PROFILER))
+	  LIBS+= -lprofiler
+        endif
     	OBJ=obj
     	EOBJ=eobj
     endif
@@ -90,42 +115,6 @@ JMACTOBJ=$(OBJ)/util_lib.$o \
 	$(OBJ)/mathutil.$o \
 	$(OBJ)/scriplib.$o \
 	$(OBJ)/animlib.$o
-
-AUDIOLIB_FX_STUB=$(OBJ)/audiolib_fxstub.$o
-AUDIOLIB_MUSIC_STUB=$(OBJ)/audiolib_musicstub.$o
-
-AUDIOLIB_FX_SDL=$(OBJ)/ll_man.$o \
-	  $(OBJ)/fx_man.$o \
-	  $(OBJ)/dsl.$o \
-	  $(OBJ)/pitch.$o \
-      $(OBJ)/multivoc.$o
-
-AUDIOLIB_MUSIC_SDL=$(OBJ)/sdlmusic.$o
-
-AUDIOLIB_FX=$(OBJ)/pitch.$o \
-	  $(OBJ)/multivoc.$o \
-	  $(OBJ)/ll_man.$o \
-	  $(OBJ)/fx_man.$o \
-      $(OBJ)/dsoundout.$o
-      
-ifeq ($(USE_OPENAL),1)
-	AUDIOLIB_FX += $(OBJ)/openal.$o
-endif
-      
-AUDIOLIB_MUSIC=$(OBJ)/midi.$o \
-	  $(OBJ)/mpu401.$o \
-	  $(OBJ)/music.$o
-
-ifeq (0,$(NOASM))
-  # Assembly sound mixing code
-  AUDIOLIB_FX_SDL += $(OBJ)/mv_mix.$o $(OBJ)/mv_mix16.$o $(OBJ)/mvreverb.$o
-  AUDIOLIB_FX     += $(OBJ)/mv_mix.$o $(OBJ)/mv_mix16.$o $(OBJ)/mvreverb.$o
-else
-  # C fallbacks for sound mixing code
-  AUDIOLIB_FX_SDL += $(OBJ)/mv_mix-c.$o $(OBJ)/mvreverb-c.$o
-  AUDIOLIB_FX     += $(OBJ)/mv_mix-c.$o $(OBJ)/mvreverb-c.$o
-endif
-
 
 GAMEOBJS=$(OBJ)/game.$o \
 	$(OBJ)/actors.$o \
@@ -142,38 +131,40 @@ GAMEOBJS=$(OBJ)/game.$o \
 	$(OBJ)/savegame.$o \
 	$(OBJ)/sector.$o \
 	$(OBJ)/rts.$o \
-	$(OBJ)/testcd.$o \
 	$(OBJ)/osdfuncs.$o \
 	$(OBJ)/osdcmds.$o \
 	$(OBJ)/grpscan.$o \
+	$(OBJ)/sounds.$o \
 	$(JMACTOBJ)
 
-EDITOROBJS=$(OBJ)/astub.$o
+EDITOROBJS=$(OBJ)/astub.$o \
+	$(OBJ)/m32def.$o \
+	$(OBJ)/m32exec.$o \
+	$(OBJ)/m32vars.$o \
+	$(OBJ)/mathutil.$o
 
 # PLATFORM SPECIFIC SETTINGS
 
 ifeq ($(PLATFORM),LINUX)
 	OURCFLAGS	+= -fno-pic
 	NASMFLAGS	+= -f elf
-	LIBS		+= -lvorbisfile -lvorbis -logg 
-	USE_OPENAL	= 0
+	LIBS		+= -lvorbisfile -lvorbis -logg
 endif
 
 ifeq ($(PLATFORM),DARWIN)
-	ALROOT = Apple
 	ifeq (1,$(SDL_FRAMEWORK))
-		OURCFLAGS	+= -fno-pic -I$(ALROOT)/include -I/Library/Frameworks/SDL.framework/Headers \
+		OURCFLAGS	+= -fno-pic -IApple/include -I/Library/Frameworks/SDL.framework/Headers \
 				-I-I/Library/Frameworks/SDL_mixer.framework/Headers
-		LIBS		+= -read_only_relocs suppress -L$(ALROOT)/lib -lvorbisfile -lvorbis -logg -lm \
-				-Wl,-framework,SDL -Wl,-framework,SDL_mixer $(ALROOT)/lib/libSDLmain.a \
+		LIBS		+= -read_only_relocs suppress -LApple/lib -lvorbisfile -lvorbis -logg -lm \
+				-Wl,-framework,SDL -Wl,-framework,SDL_mixer Apple/lib/libSDLmain.a \
 				-Wl,-framework,Cocoa -Wl,-framework,Carbon -Wl,-framework,OpenGL \
 				-Wl,-framework,CoreMidi -Wl,-framework,AudioUnit \
 				-Wl,-framework,AudioToolbox -Wl,-framework,IOKit -Wl,-framework,AGL \
 				-Wl,-framework,QuickTime -lm
 
 	else
-		OURCFLAGS	+= -fno-pic -I$(ALROOT)/include -I$(SDLROOT)/include -I$(SDLROOT)/include/SDL
-		LIBS		+= -read_only_relocs suppress -L$(ALROOT)/lib -lvorbisfile -lvorbis -logg -lm -lSDL_mixer \
+		OURCFLAGS	+= -fno-pic -I$(SDLROOT)/include -I$(SDLROOT)/include/SDL
+		LIBS		+= -read_only_relocs suppress -lvorbisfile -lvorbis -logg -lm -lSDL_mixer \
 				-Wl,-framework,Cocoa -Wl,-framework,Carbon -Wl,-framework,OpenGL \
 				-Wl,-framework,CoreMidi -Wl,-framework,AudioUnit \
 				-Wl,-framework,AudioToolbox -Wl,-framework,IOKit -Wl,-framework,AGL \
@@ -183,101 +174,79 @@ ifeq ($(PLATFORM),DARWIN)
 endif
 
 ifeq ($(PLATFORM),WINDOWS)
-	OURCFLAGS	+= -fno-pic -DUNDERSCORES -I$(DXROOT)/include -I$(ALROOT)/include # -I$(ENETROOT)/include
+	OURCFLAGS	+= -fno-pic -DUNDERSCORES -I$(DXROOT)/include
 	NASMFLAGS+= -DUNDERSCORES -f win32
-	LIBS		+= -L$(ALROOT)/lib -lvorbisfile -lvorbis -logg -lwsock32 -lws2_32 -lwinmm #-L$(ENETROOT)
-	GAMEOBJS+= $(OBJ)/gameres.$o $(OBJ)/winbits.$o $(OBJ)/startwin.game.$o
+	LIBS		+= -L$(JAUDIOLIBDIR)/third-party/mingw32/lib -lvorbisfile -lvorbis -logg -lwsock32 -lws2_32 -lwinmm -ldsound
+	GAMEOBJS+= $(OBJ)/gameres.$o $(OBJ)/winbits.$o $(OBJ)/startwin.game.$o $(OBJ)/music.$o $(OBJ)/midi.$o $(OBJ)/mpu401.$o
 	EDITOROBJS+= $(OBJ)/buildres.$o
+    JAUDIOLIB=libjfaudiolib_win32.a
+    ENETLIB=libenet_win32.a
+else
+    ifeq ($(RENDERTYPE),SDL)
+    	ifeq (0,$(SDL_FRAMEWORK))
+    		OURCFLAGS+= $(subst -Dmain=SDL_main,,$(shell $(SDLCONFIG) --cflags))
+            LIBS+= -lSDL_mixer
+    	else
+    		OURCFLAGS	+= -DSDL_FRAMEWORK
+    	endif
+
+    	ifeq (1,$(HAVE_GTK2))
+    		OURCFLAGS+= -DHAVE_GTK2 $(shell pkg-config --cflags gtk+-2.0)
+    		GAMEOBJS+= $(OBJ)/game_banner.$o $(OBJ)/startgtk.game.$o
+    		EDITOROBJS+= $(OBJ)/editor_banner.$o
+    	endif
+
+    	GAMEOBJS+= $(OBJ)/game_icon.$o $(OBJ)/sdlmusic.$o
+    	EDITOROBJS+= $(OBJ)/build_icon.$o
+    endif
 endif
 
-ifeq ($(RENDERTYPE),SDL)
-	ifeq (0,$(SDL_FRAMEWORK))
-	 OURCFLAGS+= $(subst -Dmain=SDL_main,,$(shell $(SDLCONFIG) --cflags))
-	else
-		OURCFLAGS	+= -DSDL_FRAMEWORK
-	endif
 
-		ifneq ($(PLATFORM),WINDOWS)
-			AUDIOLIBOBJ=$(AUDIOLIB_MUSIC_SDL) $(AUDIOLIB_FX_SDL) $(OBJ)/sounds.$o
-		ifeq (0,$(SDL_FRAMEWORK))
-			LIBS+= -lSDL_mixer
-		endif
-		else
-			AUDIOLIBOBJ=$(AUDIOLIB_MUSIC_STUB) $(AUDIOLIB_FX_STUB) $(OBJ)/sounds.$o
-		endif
-
-	ifeq (1,$(HAVE_GTK2))
-		OURCFLAGS+= -DHAVE_GTK2 $(shell pkg-config --cflags gtk+-2.0)
-		GAMEOBJS+= $(OBJ)/game_banner.$o $(OBJ)/startgtk.game.$o
-		EDITOROBJS+= $(OBJ)/editor_banner.$o
-	endif
-
-	GAMEOBJS+= $(OBJ)/game_icon.$o
-	EDITOROBJS+= $(OBJ)/build_icon.$o
-endif
-
-ifeq ($(RENDERTYPE),WIN)
-		AUDIOLIBOBJ=$(AUDIOLIB_MUSIC) $(AUDIOLIB_FX) $(OBJ)/sounds.$o
-endif
-
-ifeq ($(NOSOUND),1)
-    AUDIOLIBOBJ=$(AUDIOLIB_MUSIC_STUB) $(AUDIOLIB_FX_STUB) $(OBJ)/sounds.$o
-endif
-
-GAMEOBJS+= $(AUDIOLIBOBJ)
+EDITOROBJS+= $(OBJ)/sounds_mapster32.$o
 OURCFLAGS+= $(BUILDCFLAGS)
 OURCXXFLAGS+= $(BUILDCFLAGS)
 
-ifeq ($(USE_OPENAL),1)
-    OURCFLAGS+= -DUSE_OPENAL
+MISCLINKOPTS=
+ifneq (0,$(KRANDDEBUG))
+  MISCLINKOPTS=-Wl,-Map=$@.memmap
 endif
 
 ifeq ($(PRETTY_OUTPUT),1)
 .SILENT:
 endif
-.PHONY: clean all engine $(EOBJ)/$(ENGINELIB) $(EOBJ)/$(EDITORLIB)
+.PHONY: clean all engine $(EOBJ)/$(ENGINELIB) $(EOBJ)/$(EDITORLIB) $(JAUDIOLIBDIR)/$(JAUDIOLIB) $(ENETDIR)/$(ENETLIB)
 
 # TARGETS
 
-all: notice erampage$(EXESUFFIX)
-#mapster32$(EXESUFFIX)
+all: notice erampage$(EXESUFFIX) mapster32$(EXESUFFIX)
 
 all:
 	$(BUILD_FINISHED)
 	@ls -l erampage$(EXESUFFIX)
-#	@ls -l mapster32$(EXESUFFIX)
+	@ls -l mapster32$(EXESUFFIX)
 
 notice:
 	$(BUILD_STARTED)
-	
-erampage$(EXESUFFIX): $(GAMEOBJS) $(EOBJ)/$(ENGINELIB)
+
+erampage$(EXESUFFIX): $(GAMEOBJS) $(EOBJ)/$(ENGINELIB) $(JAUDIOLIBDIR)/$(JAUDIOLIB) $(ENETDIR)/$(ENETLIB)
 	$(LINK_STATUS)
-	if $(CC) -o $@ $^ $(LIBS) $(STDCPPLIB); then $(LINK_OK); else $(LINK_FAILED); fi
+	if $(CC) -o $@ $^ $(LIBS) $(STDCPPLIB) $(MISCLINKOPTS); then $(LINK_OK); else $(LINK_FAILED); fi
 ifeq (1,$(RELEASE))
-	strip erampage$(EXESUFFIX)
+  ifeq (0,$(DEBUGANYWAY))
+	$(STRIP) erampage$(EXESUFFIX)
+  endif
 endif
-	
-mapster32$(EXESUFFIX): $(EDITOROBJS) $(EOBJ)/$(EDITORLIB) $(EOBJ)/$(ENGINELIB)
+
+mapster32$(EXESUFFIX): $(EDITOROBJS) $(EOBJ)/$(EDITORLIB) $(EOBJ)/$(ENGINELIB) $(JAUDIOLIBDIR)/$(JAUDIOLIB) $(ENETDIR)/$(ENETLIB)
 	$(LINK_STATUS)
 	if $(CC) $(CFLAGS) $(OURCFLAGS) -o $@ $^ $(LIBS) $(STDCPPLIB); then $(LINK_OK); else $(LINK_FAILED); fi
 ifeq (1,$(RELEASE))	
-	strip mapster32$(EXESUFFIX)
-endif	
-
-duke3d_w32$(EXESUFFIX): $(OBJ)/wrapper.$o
-	$(LINK_STATUS)
-	if $(CC) $(CFLAGS) $(OURCFLAGS) -o $@ $^ -Wl; then $(LINK_OK); else $(LINK_FAILED); fi
-ifeq (1,$(RELEASE))	
-	strip duke3d_w32$(EXESUFFIX)
+  ifeq (0,$(DEBUGANYWAY))
+	$(STRIP) mapster32$(EXESUFFIX)
+  endif
 endif	
 
 include Makefile.deps
-
-ifneq (0,$(RANCID_NETWORKING))
-	duke3d_h+=$(EINC)/mmulti_unstable.h
-else
-	duke3d_h+=$(EINC)/mmulti.h
-endif
 
 .PHONY: enginelib editorlib
 enginelib editorlib:
@@ -286,23 +255,38 @@ ifeq ($(PRETTY_OUTPUT),1)
 	printf "\033[K\033[0;35mChanging dir to \033[1;35m$(CURDIR)/$(EROOT)\033[0;35m \033[0m\n"
 endif	
 	$(MAKE) -C $(EROOT)/ "OBJ=../$(EOBJ)" \
-		SUPERBUILD=$(SUPERBUILD) POLYMOST=$(POLYMOST) \
+		SUPERBUILD=$(SUPERBUILD) POLYMOST=$(POLYMOST) DEBUGANYWAY=$(DEBUGANYWAY) KRANDDEBUG=$(KRANDDEBUG)\
 		USE_OPENGL=$(USE_OPENGL) BUILD32_ON_64=$(BUILD32_ON_64) \
-		NOASM=$(NOASM) RELEASE=$(RELEASE) OPTLEVEL=$(OPTLEVEL) RANCID_NETWORKING=$(RANCID_NETWORKING) $@
+		NOASM=$(NOASM) RELEASE=$(RELEASE) OPTLEVEL=$(OPTLEVEL) $@
 ifeq ($(PRETTY_OUTPUT),1)		
 	printf "\033[K\033[0;35mChanging dir to \033[1;35m$(CURDIR)\033[0;35m \033[0m\n"
 endif	
-	
+
 $(EOBJ)/$(ENGINELIB): enginelib
 $(EOBJ)/$(EDITORLIB): editorlib
+$(JAUDIOLIBDIR)/$(JAUDIOLIB):
+ifeq ($(PRETTY_OUTPUT),1)	
+	printf "\033[K\033[0;35mChanging dir to \033[1;35m$(CURDIR)/$(JAUDIOLIBDIR)\033[0;35m \033[0m\n"
+endif	
+	$(MAKE) -C $(JAUDIOLIBDIR) PRETTY_OUTPUT=$(PRETTY_OUTPUT) EROOT=$(EROOT) RELEASE=$(RELEASE) OPTLEVEL=$(OPTLEVEL) DEBUGANYWAY=$(DEBUGANYWAY)
+ifeq ($(PRETTY_OUTPUT),1)		
+	printf "\033[K\033[0;35mChanging dir to \033[1;35m$(CURDIR)\033[0;35m \033[0m\n"
+endif	
+
+$(ENETDIR)/$(ENETLIB):
+ifeq ($(PRETTY_OUTPUT),1)	
+	printf "\033[K\033[0;35mChanging dir to \033[1;35m$(CURDIR)/$(ENETDIR)\033[0;35m \033[0m\n"
+endif	
+	$(MAKE) -C $(ENETDIR) PRETTY_OUTPUT=$(PRETTY_OUTPUT) EROOT=$(EROOT) RELEASE=$(RELEASE) OPTLEVEL=$(OPTLEVEL) 
+ifeq ($(PRETTY_OUTPUT),1)		
+	printf "\033[K\033[0;35mChanging dir to \033[1;35m$(CURDIR)\033[0;35m \033[0m\n"
+endif	
+
 
 # RULES
 $(OBJ)/%.$o: $(SRC)/%.nasm
 	$(COMPILE_STATUS)
-	nasm $(NASMFLAGS) $< -o $@
-$(OBJ)/%.$o: $(SRC)/jaudiolib/%.nasm
-	$(COMPILE_STATUS)
-	nasm $(NASMFLAGS) $< -o $@
+	$(AS) $(NASMFLAGS) $< -o $@
  
 $(OBJ)/%.$o: $(SRC)/%.c
 	$(COMPILE_STATUS)
@@ -315,35 +299,32 @@ $(OBJ)/%.$o: $(SRC)/%.cpp
 $(OBJ)/%.$o: $(SRC)/jmact/%.c
 	$(COMPILE_STATUS)
 	if $(CC) $(CFLAGS) $(OURCFLAGS) -c $< -o $@; then $(COMPILE_OK); else $(COMPILE_FAILED); fi
-$(OBJ)/%.$o: $(SRC)/jaudiolib/%.c
-	$(COMPILE_STATUS)
-	if $(CC) $(CFLAGS) $(OURCFLAGS) -c $< -o $@; then $(COMPILE_OK); else $(COMPILE_FAILED); fi
 
 $(OBJ)/%.$o: $(SRC)/misc/%.rc
 	$(COMPILE_STATUS)
-	if windres --use-temp-file -i $< -o $@ --include-dir=$(EINC) --include-dir=$(SRC); then $(COMPILE_OK); else $(COMPILE_FAILED); fi
+	if $(RC) -i $< -o $@ --include-dir=$(EINC) --include-dir=$(SRC) -DPOLYMER=$(POLYMER); then $(COMPILE_OK); else $(COMPILE_FAILED); fi
 
 $(OBJ)/%.$o: $(SRC)/util/%.c
 	$(COMPILE_STATUS)
 	if $(CC) $(CFLAGS) $(OURCFLAGS) -c $< -o $@; then $(COMPILE_OK); else $(COMPILE_FAILED); fi
- 
+
 $(OBJ)/%.$o: $(RSRC)/%.c
 	$(COMPILE_STATUS)
 	if $(CC) $(CFLAGS) $(OURCFLAGS) -c $< -o $@; then $(COMPILE_OK); else $(COMPILE_FAILED); fi
- 
+
 $(OBJ)/game_banner.$o: $(RSRC)/game_banner.c
 $(OBJ)/editor_banner.$o: $(RSRC)/editor_banner.c
-$(RSRC)/game_banner.c: $(RSRC)/game.bmp
+$(RSRC)/game_banner.c: $(RSRC)/game.png
 	echo "#include <gdk-pixbuf/gdk-pixdata.h>" > $@
 	gdk-pixbuf-csource --extern --struct --raw --name=startbanner_pixdata $^ | sed 's/load_inc//' >> $@
-$(RSRC)/editor_banner.c: $(RSRC)/build.bmp
+$(RSRC)/editor_banner.c: $(RSRC)/build.png
 	echo "#include <gdk-pixbuf/gdk-pixdata.h>" > $@
 	gdk-pixbuf-csource --extern --struct --raw --name=startbanner_pixdata $^ | sed 's/load_inc//' >> $@
 
 # PHONIES	
 
 clean:
-	-rm -f $(OBJ)/* erampage$(EXESUFFIX) mapster32$(EXESUFFIX) core* duke3d_w32$(EXESUFFIX)
+	-rm -f $(OBJ)/* erampage$(EXESUFFIX) mapster32$(EXESUFFIX) core* duke3d_w32$(EXESUFFIX) && $(MAKE) -C $(JAUDIOLIBDIR) clean && $(MAKE) -C $(ENETDIR) clean
 
 veryclean: clean
-	-rm -f $(EOBJ)/*
+	-rm -f $(EOBJ)/* $(RSRC)/*banner*

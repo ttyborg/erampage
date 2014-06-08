@@ -26,31 +26,24 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef __funct_h__
 #define __funct_h__
 
-#ifndef _MSC_VER
-#if defined(__GNUC__) && defined(__i386__)
-#ifndef __fastcall
-#define __fastcall __attribute__((fastcall))
-#endif
-#else
-#define __fastcall
-#endif
-#endif
-
 extern void sendscore(const char *s);
 extern void S_SoundStartup(void);
 extern void S_SoundShutdown(void);
 extern void S_MusicStartup(void);
 extern void S_MusicShutdown(void);
+extern void S_MusicVolume(int32_t);
 extern void S_MenuSound(void);
 extern int32_t S_PlayMusic(const char *fn, const int32_t sel);
-extern int32_t S_LoadSound(unsigned num);
-extern int32_t S_PlaySoundXYZ(int32_t num,int32_t i,const vec3_t *pos);
-extern void S_PlaySound(int32_t num);
+extern void S_StopMusic(void);
+extern void S_PauseMusic(int32_t);
+extern int32_t S_LoadSound(uint32_t num);
+extern int32_t S_PlaySound3D(int32_t num, int32_t i, const vec3_t *pos);
+extern int32_t S_PlaySound(int32_t num);
 extern int32_t A_PlaySound(uint32_t num,int32_t i);
 extern void S_StopSound(int32_t num);
 extern void S_StopEnvSound(int32_t num,int32_t i);
 extern void S_Pan3D(void);
-extern void S_TestSoundCallback(uint32_t num);
+extern void S_Callback(uint32_t num);
 extern void S_ClearSoundLocks(void);
 extern int32_t A_CallSound(int32_t sn,int32_t whatsprite);
 extern int32_t G_CheckActivatorMotion(int32_t lotag);
@@ -97,7 +90,7 @@ extern void P_ResetWeapons(int32_t snum);
 extern void P_ResetInventory(int32_t snum);
 extern void G_NewGame(int32_t vn,int32_t ln,int32_t sk);
 extern void G_ResetTimers(void);
-extern void Net_WaitForEverybody(void);
+extern void Net_WaitForServer(void);
 extern void clearfifo(void);
 extern void Net_ResetPrediction(void);
 extern int32_t  G_EnterLevel(int32_t g);
@@ -107,7 +100,7 @@ extern void P_QuickKill(DukePlayer_t *p);
 extern int32_t A_GetHitscanRange(int32_t i);
 extern int32_t A_CheckHitSprite(int32_t i,short *hitsp);
 extern int32_t A_Shoot(int32_t i,int32_t atwith);
-extern void P_DisplayScubaMask(int32_t snum);
+extern void P_DisplayScuba(int32_t snum);
 extern void P_DisplayWeapon(int32_t snum);
 extern void getinput(int32_t snum);
 extern void P_DropWeapon(DukePlayer_t *p);
@@ -191,6 +184,9 @@ extern int32_t A_IncurDamage(int32_t sn);
 extern void G_MoveWorld(void);
 extern void A_MoveCyclers(void);
 extern void A_MoveDummyPlayers(void);
+extern void P_ResetStatus(int32_t snum);
+extern void P_ResetPlayer(int32_t snum);
+extern void P_FragPlayer(int32_t snum);
 
 // game.c
 extern inline void G_SetStatusBarScale(int32_t sc);
@@ -198,22 +194,22 @@ extern inline void G_SetStatusBarScale(int32_t sc);
 extern void P_SetGamePalette(DukePlayer_t *player, uint8_t *pal, int32_t set);
 extern void fadepal(int32_t r, int32_t g, int32_t b, int32_t start, int32_t end, int32_t step);
 
-extern int32_t gametext_z(int32_t small, int32_t starttile, int32_t x,int32_t y,const char *t,int32_t s,int32_t p,int32_t orientation,int32_t x1, int32_t y1, int32_t x2, int32_t y2,int32_t z);
+extern int32_t G_PrintGameText(int32_t small, int32_t starttile, int32_t x,int32_t y,const char *t,int32_t s,int32_t p,int32_t orientation,int32_t x1, int32_t y1, int32_t x2, int32_t y2,int32_t z);
 extern void G_DrawTXDigiNumZ(int32_t starttile, int32_t x,int32_t y,int32_t n,int32_t s,int32_t pal,int32_t cs,int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t z);
 extern void G_DrawTileSmall(int32_t x,int32_t y,int32_t tilenum,int32_t shade,int32_t orientation);
 extern void G_DrawTilePalSmall(int32_t x,int32_t y,int32_t tilenum,int32_t shade,int32_t orientation,int32_t p);
 extern void Gv_ResetVars(void);
-extern void A_ResetVars(int32_t iActor);
+extern void __fastcall A_ResetVars(register int32_t iActor);
 
 extern int32_t minitext_(int32_t x,int32_t y,const char *t,int32_t s,int32_t p,int32_t sb);
 
 #define minitextshade(x, y, t, s, p, sb) minitext_(x,y,t,s,p,sb)
 #define minitext(x, y, t, p, sb) minitext_(x,y,t,0,p,sb)
 
-#define gametext(x,y,t,s,dabits) gametext_z(0,STARTALPHANUM, x,y,t,s,0,dabits,0, 0, xdim-1, ydim-1, 65536)
-#define gametextscaled(x,y,t,s,dabits) gametext_z(1,STARTALPHANUM, x,y,t,s,0,dabits,0, 0, xdim-1, ydim-1, 65536)
-#define gametextpal(x,y,t,s,p) gametext_z(0,STARTALPHANUM, x,y,t,s,p,26,0, 0, xdim-1, ydim-1, 65536)
-#define gametextpalbits(x,y,t,s,p,dabits) gametext_z(0,STARTALPHANUM, x,y,t,s,p,dabits,0, 0, xdim-1, ydim-1, 65536)
+#define gametext(x,y,t,s,dabits) G_PrintGameText(0,STARTALPHANUM, x,y,t,s,0,dabits,0, 0, xdim-1, ydim-1, 65536)
+#define gametextscaled(x,y,t,s,dabits) G_PrintGameText(1,STARTALPHANUM, x,y,t,s,0,dabits,0, 0, xdim-1, ydim-1, 65536)
+#define gametextpal(x,y,t,s,p) G_PrintGameText(0,STARTALPHANUM, x,y,t,s,p,26,0, 0, xdim-1, ydim-1, 65536)
+#define gametextpalbits(x,y,t,s,p,dabits) G_PrintGameText(0,STARTALPHANUM, x,y,t,s,p,dabits,0, 0, xdim-1, ydim-1, 65536)
 
 extern void G_InitDynamicTiles();
 extern void G_ProcessDynamicTileMapping(const char *szLabel, int32_t lValue);
@@ -227,13 +223,13 @@ extern void Gv_DumpValues(void);
 extern void Gv_ResetSystemDefaults(void);
 extern void Gv_InitWeaponPointers(void);
 extern void Gv_Init(void);
-extern void Gv_WriteSave(FILE *fil);
-extern int32_t Gv_ReadSave(int32_t fil);
+extern void Gv_WriteSave(FILE *fil, int32_t newbehav);
+extern int32_t Gv_ReadSave(int32_t fil, int32_t newbehav);
 
-extern int32_t __fastcall Gv_GetVar(int32_t id, int32_t iActor, int32_t iPlayer);
-extern void __fastcall Gv_SetVar(int32_t id, int32_t lValue, int32_t iActor, int32_t iPlayer);
-extern int32_t __fastcall Gv_GetVarX(int32_t id);
-extern void __fastcall Gv_SetVarX(int32_t id, int32_t lValue);
+extern int32_t __fastcall Gv_GetVar(register int32_t id, register int32_t iActor, register int32_t iPlayer);
+extern void __fastcall Gv_SetVar(register int32_t id, register int32_t lValue, register int32_t iActor, register int32_t iPlayer);
+extern int32_t __fastcall Gv_GetVarX(register int32_t id);
+extern void __fastcall Gv_SetVarX(register int32_t id, register int32_t lValue);
 
 // extern void SetGameArrayID(int32_t id,int32_t index, int32_t lValue);
 
@@ -243,18 +239,19 @@ extern void C_ReportError(int32_t iError);
 
 extern void onvideomodechange(int32_t newmode);
 
-extern void X_OnEvent(int32_t iEventID, int32_t sActor, int32_t sPlayer, int32_t lDist);
+extern void X_OnEvent(register int32_t iEventID, register int32_t sActor, register int32_t sPlayer, register int32_t lDist);
 
 extern int32_t A_CheckSoundPlaying(int32_t i, int32_t num);
 extern int32_t S_CheckSoundPlaying(int32_t i, int32_t num);
-extern void A_StopSound(int32_t num, int32_t i);
 extern void G_UpdatePlayerFromMenu(void);
-extern void Net_SendPlayerName(void);
+extern void Net_SendClientInfo(void);
 extern void Net_SendUserMapName(void);
-extern void Net_SendQuit(void);
+extern void G_GameQuit(void);
 
 extern void G_AddUserQuote(const char *daquote);
 extern void Net_NewGame(int32_t volume, int32_t level);
+extern void Net_Disconnect(void);
+extern void Net_Connect(const char * srvaddr);
 
 extern int32_t SpriteFlags[MAXTILES];
 
@@ -262,55 +259,20 @@ extern int32_t SpriteFlags[MAXTILES];
 #define A_CheckSpriteTileFlags(iPicnum, iType) ((SpriteFlags[iPicnum] & iType) != 0)
 
 static inline int32_t G_GetTeamPalette(int32_t team) {
-    switch (team) {
-    case 0:
-        return 3;
-    case 1:
-        return 10;
-    case 2:
-        return 11;
-    case 3:
-        return 12;
-    }
-    return 0;
+    int8_t pal[] = { 3, 10, 11, 12 };
+
+    if (team > (int32_t)(sizeof(pal)/sizeof(pal[0])) || team < 0)
+        return 0;
+
+    return pal[team];
 }
 
-static inline void G_AddGameLight(int32_t radius, int32_t sector, int32_t x, int32_t y, int32_t z, int32_t range, int32_t color, int32_t priority) {
-#ifdef POLYMER
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].radius = radius;
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].sector = sector;
-
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].x = x;
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].y = y;
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].z = z;
-
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].range = range;
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].range -= rand()%((gamelights[gamelightcount&(PR_MAXLIGHTS-1)].range>>3)+1);
-
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].color[0] = color&255;
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].color[1] = (color>>8)&255;
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].color[2] = (color>>16)&255;
-
-    gamelights[gamelightcount&(PR_MAXLIGHTS-1)].priority = priority;
-
-    if (gamelightcount < PR_MAXLIGHTS)
-        gamelightcount++;
-#else
-    UNREFERENCED_PARAMETER(radius);
-    UNREFERENCED_PARAMETER(sector);
-    UNREFERENCED_PARAMETER(x);
-    UNREFERENCED_PARAMETER(y);
-    UNREFERENCED_PARAMETER(z);
-    UNREFERENCED_PARAMETER(range);
-    UNREFERENCED_PARAMETER(color);
-    UNREFERENCED_PARAMETER(priority);
-#endif
-}
+extern inline void G_AddGameLight(int32_t radius, int32_t srcsprite, int32_t zoffset, int32_t range, int32_t color, int32_t priority);
 
 extern void se40code(int32_t x,int32_t y,int32_t z,int32_t a,int32_t h, int32_t smoothratio);
 
 extern void G_FreeMapState(int32_t mapnum);
-extern void G_FindLevelForFilename(const char *fn, char *volume, char *level);
+extern int32_t G_FindLevelForFilename(const char *fn);
 
 extern void G_GetCrosshairColor(void);
 extern void G_SetCrosshairColor(int32_t r, int32_t g, int32_t b);

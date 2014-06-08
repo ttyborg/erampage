@@ -23,8 +23,8 @@ int32_t CONTROL_JoyPresent = FALSE;
 int32_t CONTROL_JoystickEnabled = FALSE;
 int32_t CONTROL_MousePresent = FALSE;
 int32_t CONTROL_MouseEnabled = FALSE;
-uint64  CONTROL_ButtonState = 0;
-uint64  CONTROL_ButtonHeldState = 0;
+uint64_t  CONTROL_ButtonState = 0;
+uint64_t  CONTROL_ButtonHeldState = 0;
 
 // static int32_t CONTROL_UserInputDelay = -1;
 float  CONTROL_MouseSensitivity = DEFAULTMOUSESENSITIVITY;
@@ -50,7 +50,7 @@ static int32_t CONTROL_MouseButtonClicked[MAXMOUSEBUTTONS],      CONTROL_JoyButt
 static uint8_t CONTROL_MouseButtonClickedCount[MAXMOUSEBUTTONS], CONTROL_JoyButtonClickedCount[MAXJOYBUTTONS];
 static int32_t CONTROL_UserInputCleared[3];
 static int32_t(*GetTime)(void);
-static int32_t CONTROL_Started = FALSE;
+int32_t CONTROL_Started = FALSE;
 static int32_t ticrate;
 static int32_t CONTROL_DoubleClickSpeed;
 
@@ -69,15 +69,15 @@ void CONTROL_GetMouseDelta(void)
     {
         static int32_t lastx = 0, lasty = 0;
 
-        CONTROL_MouseAxes[0].analog = (((x + lastx) / 2.0f) * 4.0f * CONTROL_MouseSensitivity);
-        CONTROL_MouseAxes[1].analog = (((y + lasty) / 2.0f) * 4.0f * CONTROL_MouseSensitivity) * 2.0f;
+        CONTROL_MouseAxes[0].analog = (int32_t)(((x + lastx) / 2.0f) * 4.0f * CONTROL_MouseSensitivity);
+        CONTROL_MouseAxes[1].analog = (int32_t)((((y + lasty) / 2.0f) * 4.0f * CONTROL_MouseSensitivity) * 2.0f);
         lastx = x;
         lasty = y;
         return;
     }
 
-    CONTROL_MouseAxes[0].analog = (x * 4.0f * CONTROL_MouseSensitivity);
-    CONTROL_MouseAxes[1].analog = (y * 4.0f * CONTROL_MouseSensitivity) * 2.0f;
+    CONTROL_MouseAxes[0].analog = (int32_t)(x * 4.0f * CONTROL_MouseSensitivity);
+    CONTROL_MouseAxes[1].analog = (int32_t)((y * 4.0f * CONTROL_MouseSensitivity) * 2.0f);
 }
 
 int32_t CONTROL_StartMouse(void)
@@ -614,8 +614,8 @@ void CONTROL_ApplyAxis(int32_t axis, ControlInfo *info, controldevice device)
 
 void CONTROL_PollDevices(ControlInfo *info)
 {
-    memcpy(CONTROL_LastMouseAxes, CONTROL_MouseAxes, sizeof(CONTROL_MouseAxes));
-    memcpy(CONTROL_LastJoyAxes,   CONTROL_JoyAxes,   sizeof(CONTROL_JoyAxes));
+    Bmemcpy(CONTROL_LastMouseAxes, CONTROL_MouseAxes, sizeof(CONTROL_MouseAxes));
+    Bmemcpy(CONTROL_LastJoyAxes,   CONTROL_JoyAxes,   sizeof(CONTROL_JoyAxes));
 
     memset(CONTROL_MouseAxes, 0, sizeof(CONTROL_MouseAxes));
     memset(CONTROL_JoyAxes,   0, sizeof(CONTROL_JoyAxes));
@@ -848,9 +848,10 @@ void CONTROL_ClearButton(int32_t whichbutton)
     CONTROL_Flags[whichbutton].cleared = TRUE;
 }
 
-void CONTROL_ProcessBinds(void)
+inline void CONTROL_ProcessBinds(void)
 {
-    if (!bindsenabled) return;
+    if (!bindsenabled)
+        return;
 
     {
         int32_t i=MAXBOUNDKEYS-1;

@@ -28,13 +28,19 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "osd.h"
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
 int32_t g_scriptVersion = 13; // 13 = 1.3D-style CON files, 14 = 1.4/1.5 style CON files
 
 char g_szScriptFileName[BMAX_PATH] = "(none)";  // file we're currently compiling
 static char g_szCurrentBlockName[256] = "(none)", g_szLastBlockName[256] = "NULL";
 
 int32_t g_totalLines,g_lineNumber;
-static int32_t g_checkingIfElse,g_processingState;
+static int32_t g_checkingIfElse, g_processingState, g_lastKeyword = -1;
 char g_szBuf[1024];
 
 intptr_t *g_caseScriptPtr=NULL;      // the pointer to the start of the case table in a switch statement
@@ -61,7 +67,7 @@ intptr_t *aplWeaponSpawnTime[MAX_WEAPONS];      // the frame at which to spawn a
 intptr_t *aplWeaponSpawn[MAX_WEAPONS];      // the item to spawn
 intptr_t *aplWeaponShotsPerBurst[MAX_WEAPONS];  // number of shots per 'burst' (one ammo per 'burst'
 intptr_t *aplWeaponWorksLike[MAX_WEAPONS];      // What original the weapon works like
-intptr_t *aplWeaponInitialSound[MAX_WEAPONS];   // Sound made when initialy firing. zero for no sound
+intptr_t *aplWeaponInitialSound[MAX_WEAPONS];   // Sound made when weapon starts firing. zero for no sound
 intptr_t *aplWeaponFireSound[MAX_WEAPONS];      // Sound made when firing (each time for automatic)
 intptr_t *aplWeaponSound2Time[MAX_WEAPONS];     // Alternate sound time
 intptr_t *aplWeaponSound2Sound[MAX_WEAPONS];    // Alternate sound sound ID
@@ -101,8 +107,10 @@ extern int32_t qsetmode;
 char *textptr;
 int32_t g_numCompilerErrors,g_numCompilerWarnings;
 
-extern char *duke3dgrpstring;
-extern char *duke3ddef;
+extern char *g_gameNamePtr;
+extern char *g_defNamePtr;
+
+extern int32_t g_maxSoundPos;
 
 enum ScriptLabel_t {
     LABEL_ANY    = -1,
@@ -133,7 +141,7 @@ static const char *C_GetLabelType(int32_t type) {
         if (x[0]) Bstrcat(x, " or ");
         Bstrcat(x, LabelTypeText[i]);
     }
-    return strdup(x);
+    return Bstrdup(x);
 }
 
 #define NUMKEYWORDS (int32_t)(sizeof(keyw)/sizeof(keyw[0]))
@@ -522,6 +530,11 @@ const char *keyw[] = {
     "deploybias",    //380
     "ifactorhealthg",        //381
     "rndmove",
+    "<null>",                   // 346 internal inversion function
+    "sectorofwall",             // 347
+    "qstrncat",                 // 348
+    "ifactorsound",             // 349
+    "stopactorsound",           // 350
     "<null>"
 };
 
@@ -998,34 +1011,24 @@ void C_InitHashes() {
     inithashnames();
 
     hash_init(&keywH);
-    for (i=NUMKEYWORDS-1; i>=0; i--)
-        hash_add(&keywH,keyw[i],i);
-
     hash_init(&sectorH);
-    for (i=0; SectorLabels[i].lId >=0 ; i++)
-        hash_add(&sectorH,SectorLabels[i].name,i);
     hash_init(&wallH);
-    for (i=0; WallLabels[i].lId >=0 ; i++)
-        hash_add(&wallH,WallLabels[i].name,i);
     hash_init(&userdefH);
-    for (i=0; UserdefsLabels[i].lId >=0 ; i++)
-        hash_add(&userdefH,UserdefsLabels[i].name,i);
-
     hash_init(&projectileH);
-    for (i=0; ProjectileLabels[i].lId >=0 ; i++)
-        hash_add(&projectileH,ProjectileLabels[i].name,i);
     hash_init(&playerH);
-    for (i=0; PlayerLabels[i].lId >=0 ; i++)
-        hash_add(&playerH,PlayerLabels[i].name,i);
     hash_init(&inputH);
-    for (i=0; InputLabels[i].lId >=0 ; i++)
-        hash_add(&inputH,InputLabels[i].name,i);
     hash_init(&actorH);
-    for (i=0; ActorLabels[i].lId >=0 ; i++)
-        hash_add(&actorH,ActorLabels[i].name,i);
     hash_init(&tspriteH);
-    for (i=0; TsprLabels[i].lId >=0 ; i++)
-        hash_add(&tspriteH,TsprLabels[i].name,i);
+
+    for (i=NUMKEYWORDS-1; i>=0; i--) hash_add(&keywH,keyw[i],i);
+    for (i=0; SectorLabels[i].lId >= 0; i++) hash_add(&sectorH,SectorLabels[i].name,i);
+    for (i=0; WallLabels[i].lId >= 0; i++) hash_add(&wallH,WallLabels[i].name,i);
+    for (i=0; UserdefsLabels[i].lId >= 0; i++) hash_add(&userdefH,UserdefsLabels[i].name,i);
+    for (i=0; ProjectileLabels[i].lId >= 0; i++) hash_add(&projectileH,ProjectileLabels[i].name,i);
+    for (i=0; PlayerLabels[i].lId >= 0; i++) hash_add(&playerH,PlayerLabels[i].name,i);
+    for (i=0; InputLabels[i].lId >= 0; i++) hash_add(&inputH,InputLabels[i].name,i);
+    for (i=0; ActorLabels[i].lId >= 0; i++) hash_add(&actorH,ActorLabels[i].name,i);
+    for (i=0; TsprLabels[i].lId >= 0; i++) hash_add(&tspriteH,TsprLabels[i].name,i);
 }
 
 void C_FreeHashes(void) {
@@ -1121,11 +1124,14 @@ static int32_t C_SetScriptSize(int32_t size) {
 //    initprintf("script: %d, bitptr: %d\n",script,bitptr);
 
     //initprintf("offset: %d\n",(unsigned)(g_scriptPtr-script));
-    if (g_caseScriptPtr != NULL)
+
+    if (g_caseScriptPtr)
         g_caseScriptPtr = (intptr_t *)(script+ocaseScriptPtr);
-    if (g_parsingEventPtr != NULL)
+
+    if (g_parsingEventPtr)
         g_parsingEventPtr = (intptr_t *)(script+oparsingEventPtr);
-    if (g_parsingActorPtr != NULL)
+
+    if (g_parsingActorPtr)
         g_parsingActorPtr = (intptr_t *)(script+oparsingActorPtr);
 
     for (i=MAXSECTORS-1; i>=0; i--) {
@@ -1169,47 +1175,70 @@ static int32_t C_SetScriptSize(int32_t size) {
     return 0;
 }
 
-static int32_t C_SkipComments(void) {
-    char c = *textptr;
-
-    do {
-        if (c == ' ' || c == '\t' || c == '\r')
-            textptr++;
-        else if (c == '\n') {
-            g_lineNumber++;
-            textptr++;
-        } else if (c == '/' && textptr[1] == '/') {
-            if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1)
-                initprintf("%s:%d: debug: got comment.\n",g_szScriptFileName,g_lineNumber);
-            while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0)
-                textptr++;
-        } else if (c == '/' && textptr[1] == '*') {
-            if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1)
-                initprintf("%s:%d: debug: got start of comment block.\n",g_szScriptFileName,g_lineNumber);
-            while (*textptr && !(textptr[0] == '*' && textptr[1] == '/')) {
-                if (*textptr == '\n')
-                    g_lineNumber++;
-                textptr++;
-            }
-            if ((!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1) && (textptr[0] == '*' && textptr[1] == '/'))
-                initprintf("%s:%d: debug: got end of comment block.\n",g_szScriptFileName,g_lineNumber);
-            if (!*textptr) {
-                if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug)
-                    initprintf("%s:%d: debug: EOF in comment!\n",g_szScriptFileName,g_lineNumber);
-                C_ReportError(-1);
-                initprintf("%s:%d: error: found `/*' with no `*/'.\n",g_szScriptFileName,g_lineNumber);
-                g_processingState = g_numBraces = 0;
-                g_parsingActorPtr = 0;
-                g_numCompilerErrors++;
-                break;
-            } else textptr+=2;
-        } else break;
-    } while ((c = *textptr));
-
-    if ((unsigned)(g_scriptPtr-script) > (unsigned)(g_scriptSize-32))
-        return C_SetScriptSize(g_scriptSize<<1);
+static inline int32_t ispecial(const char c) {
+    if (c == ' ' || c == 0x0d || c == '(' || c == ')' ||
+            c == ',' || c == ';' || (c == 0x0a /*&& ++g_lineNumber*/))
+        return 1;
 
     return 0;
+}
+
+#define C_NextLine() while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++
+
+static int32_t C_SkipComments(void) {
+    do {
+        switch (*textptr) {
+        case '\n':
+            g_lineNumber++;
+        case ' ':
+        case '\t':
+        case '\r':
+            textptr++;
+            break;
+        case '/':
+            switch (textptr[1]) {
+            case '/': // C++ style comment
+                if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1)
+                    initprintf("%s:%d: debug: got comment.\n",g_szScriptFileName,g_lineNumber);
+                C_NextLine();
+                break;
+            case '*': // beginning of a C style comment
+                if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1)
+                    initprintf("%s:%d: debug: got start of comment block.\n",g_szScriptFileName,g_lineNumber);
+                do {
+                    if (*textptr == '\n')
+                        g_lineNumber++;
+                    textptr++;
+                } while (*textptr && (textptr[0] != '*' || textptr[1] != '/'));
+
+                if (!*textptr) {
+                    if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug)
+                        initprintf("%s:%d: debug: EOF in comment!\n",g_szScriptFileName,g_lineNumber);
+                    C_ReportError(-1);
+                    initprintf("%s:%d: error: found `/*' with no `*/'.\n",g_szScriptFileName,g_lineNumber);
+                    g_parsingActorPtr = 0;
+                    g_processingState = g_numBraces = 0;
+                    g_numCompilerErrors++;
+                    break;
+                }
+
+                if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1)
+                    initprintf("%s:%d: debug: got end of comment block.\n",g_szScriptFileName,g_lineNumber);
+
+                textptr+=2;
+                break;
+            }
+            break;
+
+        default:
+            if (ispecial(*textptr)) {
+                textptr++;
+                break;
+            }
+        case 0: // EOF
+            return ((g_scriptPtr-script) > (g_scriptSize-32)) ? C_SetScriptSize(g_scriptSize<<1) : 0;
+        }
+    } while (1);
 }
 
 static void C_SetProjectile(int32_t lVar1, int32_t lLabelID, int32_t lVar2) {
@@ -1375,18 +1404,6 @@ static int32_t C_CheckEventSync(int32_t iEventID) {
 #define GetDefID(szGameLabel) hash_find(&gamevarH,szGameLabel)
 #define GetADefID(szGameLabel) hash_find(&arrayH,szGameLabel)
 
-static inline int32_t ispecial(const char c) {
-    if (c == 0x0a) {
-        g_lineNumber++;
-        return 1;
-    }
-
-    if (c == ' ' || c == 0x0d)
-        return 1;
-
-    return 0;
-}
-
 static inline int32_t isaltok(const char c) {
     return (isalnum(c) || c == '{' || c == '}' || c == '/' || c == '\\' ||
             c == '*' || c == '-' || c == '_' || c == '.');
@@ -1415,13 +1432,6 @@ static void C_GetNextLabelName(void) {
     int32_t i;
 
     C_SkipComments();
-
-    while (isalnum(*textptr) == 0) {
-        if (*textptr == 0x0a) g_lineNumber++;
-        textptr++;
-        if (*textptr == 0)
-            return;
-    }
 
     i = 0;
     while (ispecial(*textptr) == 0 && *textptr!='['&& *textptr!=']' && *textptr!='\t' && *textptr!='\n' && *textptr!='\r')
@@ -1458,12 +1468,8 @@ static int32_t C_GetNextKeyword(void) { //Returns its code #
 
     C_SkipComments();
 
-    while (isaltok(*textptr) == 0) {
-        if (*textptr == 0x0a) g_lineNumber++;
-        if (*textptr == 0)
-            return -1;
-        textptr++;
-    }
+    if (*textptr == 0) // EOF
+        return -1;
 
     l = 0;
     while (isaltok(*(textptr+l)) && !(*(textptr + l) == '.')) {
@@ -1481,9 +1487,11 @@ static int32_t C_GetNextKeyword(void) { //Returns its code #
         if (i == CON_LEFTBRACE || i == CON_RIGHTBRACE || i == CON_NULLOP)
             *g_scriptPtr = i + (IFELSE_MAGIC<<12);
         else *g_scriptPtr = i + (g_lineNumber<<12);
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         textptr += l;
         g_scriptPtr++;
+
         if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug)
             initprintf("%s:%d: debug: translating keyword `%s'.\n",g_szScriptFileName,g_lineNumber,keyw[i]);
         return i;
@@ -1506,16 +1514,17 @@ static void C_GetNextVarType(int32_t type) {
     int32_t i=0,f=0;
 
     C_SkipComments();
+
     if (!type && !g_labelsOnly && (isdigit(*textptr) || ((*textptr == '-') && (isdigit(*(textptr+1)))))) {
         if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug)
             initprintf("%s:%d: debug: accepted constant %d in place of gamevar.\n",g_szScriptFileName,g_lineNumber,atol(textptr));
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=MAXGAMEVARS;
         if (tolower(textptr[1])=='x')
             sscanf(textptr+2,"%" PRIxPTR "",g_scriptPtr);
         else
             *g_scriptPtr=atoi(textptr);
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         g_scriptPtr++;
 #if 1
         while (!ispecial(*textptr) && *textptr != ']') textptr++;
@@ -1534,6 +1543,8 @@ static void C_GetNextVarType(int32_t type) {
             C_GetNextLabelName();
             return;
         }
+
+        textptr++;
     }
     C_GetNextLabelName();
 
@@ -1564,7 +1575,7 @@ static void C_GetNextVarType(int32_t type) {
             f |= (MAXGAMEVARS<<3);
         }
 
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=(i|f);
         C_GetNextVarType(0);
         C_SkipComments();
@@ -1622,7 +1633,7 @@ static void C_GetNextVarType(int32_t type) {
                 return;
             }
 
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
 
             if (i == g_iSpriteVarID) {
                 *g_scriptPtr++=ActorLabels[lLabelID].lId;
@@ -1664,9 +1675,9 @@ static void C_GetNextVarType(int32_t type) {
                 if (labeltype[i] & LABEL_DEFINE) {
                     if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug)
                         initprintf("%s:%d: debug: accepted defined label `%s' instead of gamevar.\n",g_szScriptFileName,g_lineNumber,label+(i<<6));
-                    bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                    bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                     *g_scriptPtr++=MAXGAMEVARS;
-                    bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                    bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                     *g_scriptPtr++=labelcode[i];
                     return;
                 }
@@ -1700,7 +1711,7 @@ static void C_GetNextVarType(int32_t type) {
     if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1)
         initprintf("%s:%d: debug: accepted gamevar `%s'.\n",g_szScriptFileName,g_lineNumber,label+(g_numLabels<<6));
 
-    bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+    bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
     *g_scriptPtr++=(i|f);
 }
 
@@ -1719,12 +1730,8 @@ static int32_t C_GetNextValue(int32_t type) {
 
     C_SkipComments();
 
-    while (isaltok(*textptr) == 0) {
-        if (*textptr == 0x0a) g_lineNumber++;
-        textptr++;
-        if (*textptr == 0)
-            return -1; // eof
-    }
+    if (*textptr == 0) // EOF
+        return -1;
 
     l = 0;
     while (isaltok(*(textptr+l))) {
@@ -1751,12 +1758,12 @@ static int32_t C_GetNextValue(int32_t type) {
             }
             if (labeltype[i] != LABEL_DEFINE && labelcode[i] >= (intptr_t)&script[0] && labelcode[i] < (intptr_t)&script[g_scriptSize])
                 bitptr[(g_scriptPtr-script)>>3] |= (BITPTR_POINTER<<((g_scriptPtr-script)&7));
-            else bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            else bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *(g_scriptPtr++) = labelcode[i];
             textptr += l;
             return labeltype[i];
         }
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *(g_scriptPtr++) = 0;
         textptr += l;
         el = (char *)C_GetLabelType(type);
@@ -1772,7 +1779,7 @@ static int32_t C_GetNextValue(int32_t type) {
     if (isdigit(*textptr) == 0 && *textptr != '-') {
         C_ReportError(ERROR_PARAMUNDEFINED);
         g_numCompilerErrors++;
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr = 0;
         g_scriptPtr++;
         textptr+=l;
@@ -1798,7 +1805,7 @@ static int32_t C_GetNextValue(int32_t type) {
 
     if (!(g_numCompilerErrors || g_numCompilerWarnings) && g_scriptDebug > 1)
         initprintf("%s:%d: debug: accepted constant %d.\n",g_szScriptFileName,g_lineNumber,atol(textptr));
-    bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+    bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
 
     if (tolower(textptr[1])=='x')
         sscanf(textptr+2,"%" PRIxPTR "",g_scriptPtr);
@@ -1810,6 +1817,41 @@ static int32_t C_GetNextValue(int32_t type) {
     textptr += l;
 
     return 0;   // literal value
+}
+
+static inline int32_t C_IntPow2(int32_t v) {
+    return ((v!=0) && (v&(v-1))==0);
+}
+
+static inline uint32_t C_Pow2IntLogBase2(int32_t v) {
+    static const uint32_t b[] = {0xAAAAAAAA, 0xCCCCCCCC, 0xF0F0F0F0,
+                                 0xFF00FF00, 0xFFFF0000
+                                };
+    register uint32_t r = (v & b[0]) != 0;
+    int32_t i = 4;
+
+    for (; i > 0; i--)
+        r |= ((v & b[i]) != 0) << i;
+
+    return r;
+}
+
+static int32_t C_CheckMalformedBranch(intptr_t lastScriptPtr) {
+    switch (C_GetKeyword()) {
+    case CON_RIGHTBRACE:
+    case CON_ENDA:
+    case CON_ENDEVENT:
+    case CON_ENDS:
+    case CON_ELSE:
+        g_scriptPtr = lastScriptPtr + &script[0];
+        g_ifElseAborted = 1;
+        C_ReportError(-1);
+        g_numCompilerWarnings++;
+        initprintf("%s:%d: warning: malformed `%s' branch\n",g_szScriptFileName,g_lineNumber,
+                   keyw[*(g_scriptPtr) & 0xFFF]);
+        return 1;
+    }
+    return 0;
 }
 
 static int32_t C_CheckEmptyBranch(int32_t tw, intptr_t lastScriptPtr) {
@@ -1829,8 +1871,7 @@ static int32_t C_CheckEmptyBranch(int32_t tw, intptr_t lastScriptPtr) {
         g_scriptPtr = lastScriptPtr + &script[0];
         initprintf("%s:%d: warning: empty `%s' branch\n",g_szScriptFileName,g_lineNumber,
                    keyw[*(g_scriptPtr) & 0xFFF]);
-        if (g_ifElseAborted)
-            *(g_scriptPtr) = (CON_NULLOP + (IFELSE_MAGIC<<12));
+        *(g_scriptPtr) = (CON_NULLOP + (IFELSE_MAGIC<<12));
         return 1;
     }
     return 0;
@@ -1871,7 +1912,7 @@ static int32_t C_CountCaseStatements() {
 }
 
 static int32_t C_ParseCommand(void) {
-    int32_t i, j=0, k=0, done, tw;
+    int32_t i, j=0, k=0, done, tw, otw = g_lastKeyword;
     char *temptextptr;
     intptr_t *tempscrptr = NULL;
 
@@ -1891,7 +1932,7 @@ static int32_t C_ParseCommand(void) {
         //Bsprintf(g_szBuf,"PC(): '%.25s'",textptr);
         //AddLog(g_szBuf);
     }
-    tw = C_GetNextKeyword();
+    g_lastKeyword = tw = C_GetNextKeyword();
     //    Bsprintf(tempbuf,"%s",keyw[tw]);
     //    AddLog(tempbuf);
 
@@ -1987,7 +2028,7 @@ static int32_t C_ParseCommand(void) {
                 *g_scriptPtr = labelcode[j];
                 if (labelcode[j] >= (intptr_t)&script[0] && labelcode[j] < (intptr_t)&script[g_scriptSize])
                     bitptr[(g_scriptPtr-script)>>3] |= (BITPTR_POINTER<<((g_scriptPtr-script)&7));
-                else bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                else bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                 g_scriptPtr++;
                 return 0;
             } else {
@@ -2085,7 +2126,7 @@ static int32_t C_ParseCommand(void) {
             return 0;
         }
 
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=ProjectileLabels[lLabelID].lId;
 
         //printf("member's flags are: %02Xh\n",PlayerLabels[lLabelID].flags);
@@ -2237,7 +2278,7 @@ static int32_t C_ParseCommand(void) {
         }
 
         while (j>-1) {
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr = 0;
             g_scriptPtr++;
             j--;
@@ -2265,7 +2306,7 @@ static int32_t C_ParseCommand(void) {
                 g_scriptPtr--;
                 j |= *g_scriptPtr;
             }
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr = j;
 
             g_scriptPtr++;
@@ -2280,28 +2321,29 @@ static int32_t C_ParseCommand(void) {
                 return 0;
             }
 
-            i = hash_find(&gamevarH,label+(g_numLabels<<6));
-            if (i>=0) {
+            if (hash_find(&gamevarH,label+(g_numLabels<<6))>=0) {
                 g_numCompilerWarnings++;
                 C_ReportError(WARNING_NAMEMATCHESVAR);
             }
 
-            i = hash_find(&labelH,label+(g_numLabels<<6));
-            if (i>=0) {
+            if ((i = hash_find(&labelH,label+(g_numLabels<<6))) >= 0) {
                 g_numCompilerWarnings++;
                 initprintf("%s:%d: warning: duplicate move `%s' ignored.\n",g_szScriptFileName,g_lineNumber,label+(g_numLabels<<6));
             }
+
             if (i == -1) {
                 hash_add(&labelH,label+(g_numLabels<<6),g_numLabels);
                 labeltype[g_numLabels] = LABEL_MOVE;
                 labelcode[g_numLabels++] = (intptr_t) g_scriptPtr;
             }
+
             for (j=1; j>=0; j--) {
                 if (C_GetKeyword() >= 0) break;
                 C_GetNextValue(LABEL_DEFINE);
             }
+
             for (k=j; k>=0; k--) {
-                bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                 *g_scriptPtr = 0;
                 g_scriptPtr++;
             }
@@ -2365,17 +2407,18 @@ static int32_t C_ParseCommand(void) {
 
     case CON_INCLUDE:
         g_scriptPtr--;
-        while (isaltok(*textptr) == 0) {
-            if (*textptr == 0x0a) g_lineNumber++;
-            textptr++;
-            if (*textptr == 0) break;
-        }
+
+        C_SkipComments();
+
         j = 0;
+        while (!isaltok(*textptr) && *textptr != 0) textptr++;
         while (isaltok(*textptr)) {
             tempbuf[j] = *(textptr++);
             j++;
         }
         tempbuf[j] = '\0';
+
+        initprintf("including '%s'.\n",tempbuf);
 
         {
             int32_t temp_ScriptLineNumber;
@@ -2419,6 +2462,9 @@ static int32_t C_ParseCommand(void) {
             g_checkingIfElse = 0;
 
             textptr = mptr;
+
+            C_SkipComments();
+
             do done = C_ParseCommand();
             while (!done);
 
@@ -2486,14 +2532,14 @@ static int32_t C_ParseCommand(void) {
                         g_scriptPtr--;
                         k |= *g_scriptPtr;
                     }
-                    bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                    bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                     *g_scriptPtr = k;
                     g_scriptPtr++;
                     return 0;
                 }
             }
             for (k=j; k<3; k++) {
-                bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                 *g_scriptPtr = 0;
                 g_scriptPtr++;
             }
@@ -2542,7 +2588,7 @@ static int32_t C_ParseCommand(void) {
                 C_GetNextValue(LABEL_DEFINE);
             }
             for (k=j; k>=0; k--) {
-                bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                 *(g_scriptPtr++) = 0;
             }
         }
@@ -2580,14 +2626,14 @@ static int32_t C_ParseCommand(void) {
                     g_scriptPtr--;
                     j |= *g_scriptPtr;
                 }
-                bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                 *g_scriptPtr = j;
                 g_scriptPtr++;
                 break;
             } else {
                 if (C_GetKeyword() >= 0) {
                     for (i=4-j; i; i--) {
-                        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                         *(g_scriptPtr++) = 0;
                     }
                     break;
@@ -2719,7 +2765,7 @@ static int32_t C_ParseCommand(void) {
         ActorType[*g_scriptPtr] = j;
 
         for (j=0; j<4; j++) {
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *(g_parsingActorPtr+j) = 0;
             if (j == 3) {
                 j = 0;
@@ -2728,14 +2774,14 @@ static int32_t C_ParseCommand(void) {
                     g_scriptPtr--;
                     j |= *g_scriptPtr;
                 }
-                bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                 *g_scriptPtr = j;
                 g_scriptPtr++;
                 break;
             } else {
                 if (C_GetKeyword() >= 0) {
                     for (i=4-j; i; i--) {
-                        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+                        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
                         *(g_scriptPtr++) = 0;
                     }
                     break;
@@ -2774,20 +2820,14 @@ static int32_t C_ParseCommand(void) {
         return 0;
 
     case CON_QSPRINTF:
-        C_GetNextValue(LABEL_DEFINE);
-        C_GetNextValue(LABEL_DEFINE);
-        for (j=3; j>=0; j--) {
-            if (C_GetKeyword() == -1)
-                C_GetNextVar();
-            else break;
-        }
+        C_GetManyVars(2);
 
-        while (j > -1) {
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
-            *g_scriptPtr = 0;
-            g_scriptPtr++;
-            j--;
-        }
+        j = 0;
+
+        while (C_GetKeyword() == -1 && j < 32)
+            C_GetNextVar(), j++;
+
+        *g_scriptPtr++ = CON_NULLOP + (g_lineNumber<<12);
         return 0;
 
     case CON_ESPAWN:
@@ -2875,8 +2915,13 @@ static int32_t C_ParseCommand(void) {
         if (g_checkingIfElse) {
             intptr_t offset;
             intptr_t lastScriptPtr = g_scriptPtr - &script[0] - 1;
+
             g_ifElseAborted = 0;
             g_checkingIfElse--;
+
+            if (C_CheckMalformedBranch(lastScriptPtr))
+                return 0;
+
             tempscrptr = g_scriptPtr;
             offset = (unsigned)(tempscrptr-script);
             g_scriptPtr++; //Leave a spot for the fail location
@@ -2957,7 +3002,7 @@ static int32_t C_ParseCommand(void) {
             C_ReportError(ERROR_SYMBOLNOTRECOGNIZED);
             return 0;
         }
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=lLabelID;
 
         // now at target VAR...
@@ -3081,7 +3126,7 @@ static int32_t C_ParseCommand(void) {
             C_ReportError(ERROR_SYMBOLNOTRECOGNIZED);
             return 0;
         }
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=lLabelID;
 
         // now at target VAR...
@@ -3143,7 +3188,7 @@ static int32_t C_ParseCommand(void) {
             return 0;
         }
 
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=PlayerLabels[lLabelID].lId;
 
         //printf("member's flags are: %02Xh\n",PlayerLabels[lLabelID].flags);
@@ -3215,7 +3260,7 @@ static int32_t C_ParseCommand(void) {
             return 0;
         }
 
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=InputLabels[lLabelID].lId;
 
         // now at target VAR...
@@ -3261,7 +3306,7 @@ static int32_t C_ParseCommand(void) {
             C_ReportError(ERROR_SYMBOLNOTRECOGNIZED);
             return 0;
         }
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=lLabelID;
 
         // now at target VAR...
@@ -3362,7 +3407,6 @@ static int32_t C_ParseCommand(void) {
                 C_ReportError(-1);
                 initprintf("%s:%d: error: variable `%s' is not per-actor.\n",g_szScriptFileName,g_lineNumber,label+(g_numLabels<<6));
                 return 0;
-
             }
             break;
         }
@@ -3372,13 +3416,12 @@ static int32_t C_ParseCommand(void) {
                 C_ReportError(-1);
                 initprintf("%s:%d: error: variable `%s' is not per-player.\n",g_szScriptFileName,g_lineNumber,label+(g_numLabels<<6));
                 return 0;
-
             }
             break;
         }
         }
 
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=i; // the ID of the DEF (offset into array...)
 
         switch (tw) {
@@ -3442,7 +3485,7 @@ static int32_t C_ParseCommand(void) {
             return 0;
         }
 
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=ActorLabels[lLabelID].lId;
 
         //printf("member's flags are: %02Xh\n",ActorLabels[lLabelID].flags);
@@ -3516,7 +3559,7 @@ static int32_t C_ParseCommand(void) {
             return 0;
         }
 
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=TsprLabels[lLabelID].lId;
 
         //printf("member's flags are: %02Xh\n",ActorLabels[lLabelID].flags);
@@ -3530,6 +3573,15 @@ static int32_t C_ParseCommand(void) {
             C_GetNextVar();
         break;
     }
+
+    case CON_STOPACTORSOUND:
+        C_GetManyVars(2);
+        break;
+
+    case CON_SECTOROFWALL:
+        C_GetNextVarType(GAMEVAR_READONLY);
+        C_GetNextVar();
+        return 0;
 
     case CON_GETTICKS:
         if (C_CheckEventSync(g_currentEvent)) {
@@ -3618,6 +3670,9 @@ static int32_t C_ParseCommand(void) {
     case CON_SHIFTVARL:
     case CON_SHIFTVARR:
 
+    {
+        intptr_t *inst = g_scriptPtr-1;
+        char *tptr = textptr;
         // syntax: [rand|add|set]var    <var1> <const1>
         // sets var1 to const1
         // adds const1 to var1 (const1 can be negative...)
@@ -3629,28 +3684,64 @@ static int32_t C_ParseCommand(void) {
         else C_GetNextVar();
 
         C_GetNextValue(LABEL_DEFINE); // the number to check against...
-        return 0;
+
+        if (tw == CON_MULVAR && *(g_scriptPtr-1) == -1) {
+            *inst = CON_INV;
+            g_scriptPtr--;
+            return 0;
+        }
+
+        if (tw == CON_DIVVAR || (tw == CON_MULVAR && *(g_scriptPtr-1) > 0)) {
+            int32_t i = *(g_scriptPtr-1);
+            j = klabs(*(g_scriptPtr-1));
+
+            if (C_IntPow2(j)) {
+                *inst = ((tw == CON_DIVVAR) ? CON_SHIFTVARR : CON_SHIFTVARL);
+                *(g_scriptPtr-1) = C_Pow2IntLogBase2(j);
+//                    initprintf("%s:%d: replacing multiply/divide with shift\n",g_szScriptFileName,g_lineNumber);
+
+                if (i == j)
+                    return 0;
+
+                *g_scriptPtr++ = CON_INV + (g_lineNumber<<12);
+                textptr = tptr;
+                C_GetNextVarType(GAMEVAR_READONLY);
+                C_GetNextValue(LABEL_DEFINE);
+                g_scriptPtr--;
+//                    initprintf("%s:%d: adding inversion\n",g_szScriptFileName,g_lineNumber);
+            }
+        }
+    }
+    return 0;
     case CON_WRITEARRAYTOFILE:
     case CON_READARRAYFROMFILE:
         C_GetNextLabelName();
         i=GetADefID(label+(g_numLabels<<6));
         if (i > (-1)) {
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr++=i;
-        } else
+        } else {
+            g_numCompilerErrors++;
             C_ReportError(ERROR_NOTAGAMEARRAY);
+            return 1;
+        }
         C_GetNextValue(LABEL_DEFINE);
         return 0;
     case CON_COPY:
         C_GetNextLabelName();
         i=GetADefID(label+(g_numLabels<<6));
         if (i > (-1)) {
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr++=i;
-        } else
+        } else {
+            g_numCompilerErrors++;
             C_ReportError(ERROR_NOTAGAMEARRAY);
+            return 1;
+        }
         C_SkipComments();// skip comments and whitespace
-        if (*textptr != '[') {
+        if (*textptr != '[')
+
+        {
             g_numCompilerErrors++;
             C_ReportError(ERROR_GAMEARRAYBNO);
             return 1;
@@ -3668,10 +3759,14 @@ static int32_t C_ParseCommand(void) {
         C_GetNextLabelName();
         i=GetADefID(label+(g_numLabels<<6));
         if (i > (-1)) {
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr++=i;
-        } else
+        } else {
+            g_numCompilerErrors++;
             C_ReportError(ERROR_NOTAGAMEARRAY);
+            return 1;
+        }
+
         C_SkipComments();// skip comments and whitespace
         if (*textptr != '[') {
             g_numCompilerErrors++;
@@ -3694,10 +3789,13 @@ static int32_t C_ParseCommand(void) {
         C_GetNextLabelName();
         i=GetADefID(label+(g_numLabels<<6));
         if (i > (-1)) {
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr++=i;
-        } else
+        } else {
+            g_numCompilerErrors++;
             C_ReportError(ERROR_NOTAGAMEARRAY);
+            return 1;
+        }
         C_SkipComments();
         C_GetNextVar();
         return 0;
@@ -3896,6 +3994,7 @@ static int32_t C_ParseCommand(void) {
         return 0;
     }
 
+    case CON_IFACTORSOUND:
     case CON_IFVARVARG:
     case CON_IFVARVARL:
     case CON_IFVARVARE:
@@ -3911,6 +4010,10 @@ static int32_t C_ParseCommand(void) {
         g_ifElseAborted = 0;
 
         C_GetManyVars(2);
+
+        if (C_CheckMalformedBranch(lastScriptPtr))
+            return 0;
+
         tempscrptr = g_scriptPtr;
         offset = (unsigned)(g_scriptPtr-script);
         g_scriptPtr++; // Leave a spot for the fail location
@@ -3963,6 +4066,9 @@ static int32_t C_ParseCommand(void) {
         // get the ID of the DEF
         C_GetNextVar();
         C_GetNextValue(LABEL_DEFINE); // the number to check against...
+
+        if (C_CheckMalformedBranch(lastScriptPtr))
+            return 0;
 
         tempscrptr = g_scriptPtr;
         offset = (unsigned)(tempscrptr-script);
@@ -4147,12 +4253,12 @@ static int32_t C_ParseCommand(void) {
 
         tempscrptr= g_scriptPtr;
         tempoffset = (unsigned)(tempscrptr-script);
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=0; // leave spot for end location (for after processing)
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=0; // count of case statements
         g_caseScriptPtr=g_scriptPtr;        // the first case's pointer.
-        bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+        bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
         *g_scriptPtr++=0; // leave spot for 'default' location (null if none)
 
         temptextptr=textptr;
@@ -4184,9 +4290,9 @@ static int32_t C_ParseCommand(void) {
 
         while (j--) {
             // leave room for statements
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr++=0; // value check
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr++=0; // code offset
             C_SkipComments();
         }
@@ -4250,14 +4356,17 @@ static int32_t C_ParseCommand(void) {
     case CON_CASE: {
         intptr_t tempoffset = 0;
         //AddLog("Found Case");
-repeatcase:
-        g_scriptPtr--; // don't save in code
-        if (g_checkingSwitch<1) {
+
+        if (g_checkingSwitch < 1) {
             g_numCompilerErrors++;
             C_ReportError(-1);
             initprintf("%s:%d: error: found `case' statement when not in switch\n",g_szScriptFileName,g_lineNumber);
+            g_scriptPtr--;
             return 1;
         }
+
+repeatcase:
+        g_scriptPtr--; // don't save in code
         g_numCases++;
         //Bsprintf(g_szBuf,"case1: %.12s",textptr);
         //AddLog(g_szBuf);
@@ -4267,7 +4376,7 @@ repeatcase:
         //Bsprintf(g_szBuf,"case2: %.12s",textptr);
         //AddLog(g_szBuf);
 
-        j=*(--g_scriptPtr);      // get value
+        j= *(--g_scriptPtr);      // get value
         //Bsprintf(g_szBuf,"case: Value of case %d is %d",(int32_t)g_numCases,(int32_t)j);
         //AddLog(g_szBuf);
         if (g_caseScriptPtr) {
@@ -4285,8 +4394,7 @@ repeatcase:
         //Bsprintf(g_szBuf,"case3: %.12s",textptr);
         //AddLog(g_szBuf);
 
-        j = C_GetKeyword();
-        if (j == CON_CASE) {
+        if (C_GetKeyword() == CON_CASE) {
             //AddLog("Found Repeat Case");
             C_GetNextKeyword();    // eat 'case'
             goto repeatcase;
@@ -4294,11 +4402,11 @@ repeatcase:
         //Bsprintf(g_szBuf,"case4: '%.12s'",textptr);
         //AddLog(g_szBuf);
         tempoffset = (unsigned)(tempscrptr-script);
+
         while (C_ParseCommand() == 0) {
             //Bsprintf(g_szBuf,"case5 '%.25s'",textptr);
             //AddLog(g_szBuf);
-            j = C_GetKeyword();
-            if (j == CON_CASE) {
+            if (C_GetKeyword() == CON_CASE) {
                 //AddLog("Found Repeat Case");
                 C_GetNextKeyword();    // eat 'case'
                 tempscrptr = (intptr_t *)(script+tempoffset);
@@ -4312,6 +4420,12 @@ repeatcase:
     }
     case CON_DEFAULT:
         g_scriptPtr--;    // don't save
+
+        C_SkipComments();
+
+        if (*textptr == ':')
+            textptr++;
+
         if (g_checkingSwitch<1) {
             g_numCompilerErrors++;
             C_ReportError(-1);
@@ -4348,6 +4462,9 @@ repeatcase:
         return 1;      // end of block
         break;
 
+    case CON_QSTRNCAT:
+        C_GetManyVars(3);
+        return 0;
     case CON_CHANGESPRITESTAT:
     case CON_CHANGESPRITESECT:
     case CON_ZSHOOTVAR:
@@ -4458,11 +4575,12 @@ repeatcase:
                 g_scriptPtr--;
                 j |= *g_scriptPtr;
             } while (C_GetKeyword() == -1);
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr = j;
             g_scriptPtr++;
             break;
         case CON_IFSOUND:
+        case CON_IFACTORSOUND:
             if (C_CheckEventSync(g_currentEvent)) {
                 C_ReportError(WARNING_REVEVENTSYNC);
                 g_numCompilerWarnings++;
@@ -4471,6 +4589,9 @@ repeatcase:
             C_GetNextValue(LABEL_DEFINE);
             break;
         }
+
+        if (C_CheckMalformedBranch(lastScriptPtr))
+            return 0;
 
         tempscrptr = g_scriptPtr;
         offset = (unsigned)(tempscrptr-script);
@@ -4527,6 +4648,9 @@ repeatcase:
         intptr_t lastScriptPtr = (g_scriptPtr-&script[0]-1);
 
         g_ifElseAborted = 0;
+
+        if (C_CheckMalformedBranch(lastScriptPtr))
+            return 0;
 
         tempscrptr = g_scriptPtr;
         offset = (unsigned)(tempscrptr-script);
@@ -4616,8 +4740,7 @@ repeatcase:
     case CON_BETANAME:
         g_scriptPtr--;
         j = 0;
-        while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0)
-            textptr++;
+        C_NextLine();
         return 0;
 
     case CON_DEFINEVOLUMENAME:
@@ -4626,13 +4749,13 @@ repeatcase:
         C_GetNextValue(LABEL_DEFINE);
         g_scriptPtr--;
         j = *g_scriptPtr;
-        while (*textptr == ' ' || *textptr == '\t') textptr++;
+        C_SkipComments();
 
         if (j < 0 || j > MAXVOLUMES-1) {
             initprintf("%s:%d: error: volume number exceeds maximum volume count.\n",
                        g_szScriptFileName,g_lineNumber);
             g_numCompilerErrors++;
-            while (*textptr != 0x0a && *textptr != 0) textptr++;
+            C_NextLine();
             break;
         }
 
@@ -4645,7 +4768,7 @@ repeatcase:
                 initprintf("%s:%d: warning: truncating volume name to %d characters.\n",
                            g_szScriptFileName,g_lineNumber,sizeof(EpisodeNames[j])-1);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                C_NextLine();
                 break;
             }
         }
@@ -4658,13 +4781,13 @@ repeatcase:
         C_GetNextValue(LABEL_DEFINE);
         g_scriptPtr--;
         j = *g_scriptPtr;
-        while (*textptr == ' ' || *textptr == '\t') textptr++;
+        C_SkipComments();
 
         if (j < 0 || j > NUMGAMEFUNCTIONS-1) {
             initprintf("%s:%d: error: function number exceeds number of game functions.\n",
                        g_szScriptFileName,g_lineNumber);
             g_numCompilerErrors++;
-            while (*textptr != 0x0a && *textptr != 0) textptr++;
+            C_NextLine();
             break;
         }
 
@@ -4674,18 +4797,18 @@ repeatcase:
             gamefunctions[j][i] = *textptr;
             keydefaults[j*3][i] = *textptr;
             textptr++,i++;
-            if (*textptr == '/' || *textptr == ' ') {
+            if (*textptr != 0x0a && *textptr != 0x0d && ispecial(*textptr)) {
                 initprintf("%s:%d: warning: invalid character in function name.\n",
                            g_szScriptFileName,g_lineNumber);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                C_NextLine();
                 break;
             }
             if (i >= MAXGAMEFUNCLEN-1) {
                 initprintf("%s:%d: warning: truncating function name to %d characters.\n",
                            g_szScriptFileName,g_lineNumber,MAXGAMEFUNCLEN);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                C_NextLine();
                 break;
             }
         }
@@ -4706,13 +4829,13 @@ repeatcase:
         C_GetNextValue(LABEL_DEFINE);
         g_scriptPtr--;
         j = *g_scriptPtr;
-        while (*textptr == ' ' || *textptr == '\t') textptr++;
+        C_SkipComments();
 
         if (j < 0 || j > 4) {
             initprintf("%s:%d: error: skill number exceeds maximum skill count.\n",
                        g_szScriptFileName,g_lineNumber);
             g_numCompilerErrors++;
-            while (*textptr != 0x0a && *textptr != 0) textptr++;
+            C_NextLine();
             break;
         }
 
@@ -4725,7 +4848,7 @@ repeatcase:
                 initprintf("%s:%d: warning: truncating skill name to %d characters.\n",
                            g_szScriptFileName,g_lineNumber,sizeof(SkillNames[j])-1);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                C_NextLine();
                 break;
             }
         }
@@ -4736,7 +4859,7 @@ repeatcase:
         char gamename[32];
         g_scriptPtr--;
 
-        while (*textptr == ' ' || *textptr == '\t') textptr++;
+        C_SkipComments();
 
         i = 0;
 
@@ -4747,42 +4870,36 @@ repeatcase:
                 initprintf("%s:%d: warning: truncating game name to %d characters.\n",
                            g_szScriptFileName,g_lineNumber,sizeof(gamename)-1);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                C_NextLine();
                 break;
             }
         }
         gamename[i] = '\0';
-        duke3dgrpstring = Bstrdup(gamename);
-        Bsprintf(tempbuf,"%s - " APPNAME,duke3dgrpstring);
+        g_gameNamePtr = Bstrdup(gamename);
+        Bsprintf(tempbuf,"%s - " APPNAME,g_gameNamePtr);
         wm_setapptitle(tempbuf);
     }
     return 0;
 
     case CON_SETDEFNAME: {
         g_scriptPtr--;
-        while (isaltok(*textptr) == 0) {
-            if (*textptr == 0x0a) g_lineNumber++;
-            textptr++;
-            if (*textptr == 0) break;
-        }
+        C_SkipComments();
+
         j = 0;
         while (isaltok(*textptr)) {
             tempbuf[j] = *(textptr++);
             j++;
         }
         tempbuf[j] = '\0';
-        duke3ddef = Bstrdup(tempbuf);
-        initprintf("Using DEF file: %s.\n",duke3ddef);
+        g_defNamePtr = Bstrdup(tempbuf);
+        initprintf("Using DEF file: %s.\n",g_defNamePtr);
     }
     return 0;
 
     case CON_SETCFGNAME: {
         g_scriptPtr--;
-        while (isaltok(*textptr) == 0) {
-            if (*textptr == 0x0a) g_lineNumber++;
-            textptr++;
-            if (*textptr == 0) break;
-        }
+        C_SkipComments();
+
         j = 0;
         while (isaltok(*textptr)) {
             tempbuf[j] = *(textptr++);
@@ -4799,12 +4916,12 @@ repeatcase:
             int32_t glrm = glrendmode;
 #endif
 
-            if (stat(mod_dir, &st) < 0) {
+            if (stat(g_modDir, &st) < 0) {
                 if (errno == ENOENT) {   // path doesn't exist
-                    if (Bmkdir(mod_dir, S_IRWXU) < 0) {
-                        OSD_Printf("Failed to create configuration file directory %s\n", mod_dir);
+                    if (Bmkdir(g_modDir, S_IRWXU) < 0) {
+                        OSD_Printf("Failed to create configuration file directory %s\n", g_modDir);
                         return 0;
-                    } else OSD_Printf("Created configuration file directory %s\n", mod_dir);
+                    } else OSD_Printf("Created configuration file directory %s\n", g_modDir);
                 } else {
                     // another type of failure
                     return 0;
@@ -4816,8 +4933,8 @@ repeatcase:
 
             Bstrcpy(temp,tempbuf);
             CONFIG_WriteSetup();
-            if (mod_dir[0] != '/')
-                Bsprintf(setupfilename,"%s/",mod_dir);
+            if (g_modDir[0] != '/')
+                Bsprintf(setupfilename,"%s/",g_modDir);
             else setupfilename[0] = 0;
             Bstrcat(setupfilename,temp);
 
@@ -4849,12 +4966,12 @@ repeatcase:
         g_scriptPtr--;
         GametypeFlags[j] = *g_scriptPtr;
 
-        while (*textptr == ' ' || *textptr == '\t') textptr++;
+        C_SkipComments();
 
         if (j < 0 || j > MAXGAMETYPES-1) {
             initprintf("%s:%d: error: gametype number exceeds maximum gametype count.\n",g_szScriptFileName,g_lineNumber);
             g_numCompilerErrors++;
-            while (*textptr != 0x0a && *textptr != 0) textptr++;
+            C_NextLine();
             break;
         }
         g_numGametypes = j+1;
@@ -4868,7 +4985,7 @@ repeatcase:
                 initprintf("%s:%d: warning: truncating gametype name to %d characters.\n",
                            g_szScriptFileName,g_lineNumber,sizeof(GametypeNames[j])-1);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                C_NextLine();
                 break;
             }
         }
@@ -4883,18 +5000,18 @@ repeatcase:
         C_GetNextValue(LABEL_DEFINE);
         g_scriptPtr--;
         k = *g_scriptPtr;
-        while (*textptr == ' ' || *textptr == '\t') textptr++;
+        C_SkipComments();
 
         if (j < 0 || j > MAXVOLUMES-1) {
             initprintf("%s:%d: error: volume number exceeds maximum volume count.\n",g_szScriptFileName,g_lineNumber);
             g_numCompilerErrors++;
-            while (*textptr != 0x0a && *textptr != 0) textptr++;
+            C_NextLine();
             break;
         }
         if (k < 0 || k > MAXLEVELS-1) {
             initprintf("%s:%d: error: level number exceeds maximum number of levels per episode.\n",g_szScriptFileName,g_lineNumber);
             g_numCompilerErrors++;
-            while (*textptr != 0x0a && *textptr != 0) textptr++;
+            C_NextLine();
             break;
         }
 
@@ -4921,11 +5038,9 @@ repeatcase:
         else if ((Bstrlen(tempbuf)+1) > sizeof(MapInfo[j*MAXLEVELS+k].filename))
             MapInfo[j*MAXLEVELS+k].filename = Brealloc(MapInfo[j*MAXLEVELS+k].filename,(Bstrlen(tempbuf)+1));
 
-        /*         initprintf("level file name string len: %d\n",Bstrlen(tempbuf)); */
-
         Bstrcpy(MapInfo[j*MAXLEVELS+k].filename,tempbuf);
 
-        while (*textptr == ' ' || *textptr == '\t') textptr++;
+        C_SkipComments();
 
         MapInfo[j*MAXLEVELS+k].partime =
             (((*(textptr+0)-'0')*10+(*(textptr+1)-'0'))*GAMETICSPERSEC*60)+
@@ -4950,7 +5065,7 @@ repeatcase:
                 initprintf("%s:%d: warning: truncating level name to %d characters.\n",
                            g_szScriptFileName,g_lineNumber,32);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                C_NextLine();
                 break;
             }
         }
@@ -5010,12 +5125,15 @@ repeatcase:
         }
 
         while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) {
-            if (*textptr == '%' && *(textptr+1) == 's') {
-                initprintf("%s:%d: error: quote text contains string identifier.\n",g_szScriptFileName,g_lineNumber);
-                g_numCompilerErrors++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
-                break;
-            }
+            /*
+                        if (*textptr == '%' && *(textptr+1) == 's')
+                        {
+                            initprintf("%s:%d: error: quote text contains string identifier.\n",g_szScriptFileName,g_lineNumber);
+                            g_numCompilerErrors++;
+                            while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                            break;
+                        }
+            */
             if (tw == CON_DEFINEQUOTE)
                 *(ScriptQuotes[k]+i) = *textptr;
             else
@@ -5024,7 +5142,7 @@ repeatcase:
             if (i >= MAXQUOTELEN-1) {
                 initprintf("%s:%d: warning: truncating quote text to %d characters.\n",g_szScriptFileName,g_lineNumber,MAXQUOTELEN-1);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+                C_NextLine();
                 break;
             }
         }
@@ -5032,7 +5150,7 @@ repeatcase:
             *(ScriptQuotes[k]+i) = '\0';
         else {
             *(ScriptQuoteRedefinitions[g_numQuoteRedefinitions]+i) = '\0';
-            bitptr[(g_scriptPtr-script)>>3] &= ~(1<<((g_scriptPtr-script)&7));
+            bitptr[(g_scriptPtr-script)>>3] &= ~(BITPTR_POINTER<<((g_scriptPtr-script)&7));
             *g_scriptPtr++=g_numQuoteRedefinitions;
             g_numQuoteRedefinitions++;
         }
@@ -5055,7 +5173,7 @@ repeatcase:
         if (k > 25) {
             initprintf("%s:%d: error: cheat redefinition attempts to redefine nonexistent cheat.\n",g_szScriptFileName,g_lineNumber);
             g_numCompilerErrors++;
-            while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0) textptr++;
+            C_NextLine();
             break;
         }
         g_scriptPtr--;
@@ -5069,7 +5187,7 @@ repeatcase:
                 initprintf("%s:%d: warning: truncating cheat string to %d characters.\n",
                            g_szScriptFileName,g_lineNumber,MAXCHEATLEN,sizeof(CheatStrings[k])-1);
                 g_numCompilerWarnings++;
-                while (*textptr != 0x0a && *textptr != 0x0d && *textptr != 0 && *textptr != ' ') textptr++;
+                C_NextLine();
                 break;
             }
         }
@@ -5095,33 +5213,43 @@ repeatcase:
             G_GameExit(tempbuf);
         }
 
-        while (*textptr != ' ' || *textptr == '\t') {
-            g_sounds[k].filename[i] = *textptr;
-            textptr++,i++;
-            if (i >= BMAX_PATH) {
-                initprintf("%s:%d: error: sound filename exceeds limit of %d characters.\n",g_szScriptFileName,g_lineNumber,BMAX_PATH);
-                g_numCompilerErrors++;
-                C_SkipComments();
-                break;
+        if (*textptr == '\"') {
+            textptr++;
+            while (*textptr && *textptr != '\"') {
+                g_sounds[k].filename[i++] = *textptr++;
+                if (i >= BMAX_PATH) {
+                    initprintf("%s:%d: error: sound filename exceeds limit of %d characters.\n",g_szScriptFileName,g_lineNumber,BMAX_PATH);
+                    g_numCompilerErrors++;
+                    C_SkipComments();
+                    break;
+                }
             }
-        }
+            textptr++;
+        } else while (*textptr != ' ' && *textptr != '\t' && *textptr != '\r' && *textptr != '\n') {
+                g_sounds[k].filename[i++] = *textptr++;
+                if (i >= BMAX_PATH) {
+                    initprintf("%s:%d: error: sound filename exceeds limit of %d characters.\n",g_szScriptFileName,g_lineNumber,BMAX_PATH);
+                    g_numCompilerErrors++;
+                    C_SkipComments();
+                    break;
+                }
+            }
         g_sounds[k].filename[i] = '\0';
 
         C_GetNextValue(LABEL_DEFINE);
         g_sounds[k].ps = *(g_scriptPtr-1);
-        g_scriptPtr--;
         C_GetNextValue(LABEL_DEFINE);
         g_sounds[k].pe = *(g_scriptPtr-1);
-        g_scriptPtr--;
         C_GetNextValue(LABEL_DEFINE);
         g_sounds[k].pr = *(g_scriptPtr-1);
-        g_scriptPtr--;
         C_GetNextValue(LABEL_DEFINE);
         g_sounds[k].m = *(g_scriptPtr-1);
-        g_scriptPtr--;
         C_GetNextValue(LABEL_DEFINE);
         g_sounds[k].vo = *(g_scriptPtr-1);
-        g_scriptPtr--;
+        g_scriptPtr -= 5;
+
+        if (k > g_maxSoundPos)
+            g_maxSoundPos = k;
         return 0;
 
     case CON_ENDEVENT:
@@ -5148,8 +5276,7 @@ repeatcase:
             *(g_scriptPtr++) = CON_ENDEVENT;
             previous_event = NULL;
         }
-        g_parsingEventPtr = 0;
-        g_parsingActorPtr = 0;
+        g_parsingEventPtr = g_parsingActorPtr = 0;
         g_currentEvent = -1;
         Bsprintf(g_szCurrentBlockName,"(none)");
         return 0;
@@ -5175,6 +5302,12 @@ repeatcase:
     case CON_RETURN:
     case CON_BREAK:
         if (g_checkingSwitch) {
+            if (otw == CON_BREAK) {
+                C_ReportError(-1);
+                initprintf("%s:%d: error: duplicate `break'.\n",g_szScriptFileName, g_lineNumber);
+                g_numCompilerErrors++;
+            }
+
             //Bsprintf(g_szBuf,"  * (L%d) case Break statement.\n",g_lineNumber);
             //AddLog(g_szBuf);
             return 1;
@@ -5464,16 +5597,23 @@ static void C_AddDefaultDefinitions(void) {
     C_AddDefinition("PROJ_YREPEAT",PROJ_YREPEAT,LABEL_DEFINE);
 }
 
+#pragma pack(push,1)
 static void C_InitProjectiles(void) {
     int32_t i;
     struct {
-        int32_t workslike, extra, cstat, extra_rand, hitradius, range, flashcolor;
-        int16_t spawns, sound, isound, vel, decal, trail, tnum, drop, clipdist, offset, bounces, bsound, toffset;
-        int8_t sxrepeat, syrepeat, txrepeat, tyrepeat, shade, xrepeat, yrepeat, pal, velmult;
+        int32_t workslike, extra, cstat, extra_rand; // 16b
+        int32_t hitradius, range, flashcolor; // 12b
+        int16_t spawns, sound, isound, vel; // 8b
+        int16_t decal, trail, tnum, drop; // 8b
+        int16_t clipdist, offset, bounces, bsound; // 8b
+        int16_t toffset; // 2b
+        int8_t sxrepeat, syrepeat, txrepeat, tyrepeat; // 4b
+        int8_t shade, xrepeat, yrepeat, pal; // 4b
+        int8_t velmult, filler; // 2b
     } DefaultProjectile = {
         1, 100, -1, -1, 2048, 0, 0,
         SMALLSMOKE, -1, -1, 600, BULLETHOLE, -1, 0, 0, 32, 448, g_numBUZSAWBounces, PIPEBOMB_BOUNCE, 1,
-        -1, -1, -1, -1, -96, 18, 18, 0, 1
+        -1, -1, -1, -1, -96, 18, 18, 0, 1, 0
     };
 
     // this will only happen if I forget to update this function...
@@ -5485,6 +5625,7 @@ static void C_InitProjectiles(void) {
 
     Bmemcpy(&DefaultProjectileData[0], &ProjectileData[0], sizeof(ProjectileData));
 }
+#pragma pack(pop)
 
 extern int32_t g_numObituaries;
 extern int32_t g_numSelfObituaries;
@@ -5505,14 +5646,15 @@ void C_Compile(const char *filenam) {
     if (fp == -1) { // JBF: was 0
         extern int32_t numgroupfiles;
 
-        if (g_loadFromGroupOnly == 1) {
-            Bsprintf(tempbuf,"'%s' missing CON files, reinstall the game.",duke3dgrp);
-        } else if (numgroupfiles == 0) {
+        if (g_loadFromGroupOnly == 1 || numgroupfiles == 0) {
             Bsprintf(tempbuf,"Game data was not found.  A copy of '%s' or other compatible data is needed to run eRampage.\n"
                      "eRampage will now close.",
-                     duke3dgrp);
-        } else Bsprintf(tempbuf,"CON file `%s' missing.", filenam);
-        G_GameExit(tempbuf);
+                     g_grpNamePtr);
+            G_GameExit(tempbuf);
+        } else {
+            Bsprintf(tempbuf,"CON file `%s' missing.", filenam);
+            G_GameExit(tempbuf);
+        }
 
         //g_loadFromGroupOnly = 1;
         return; //Not there
@@ -5521,6 +5663,8 @@ void C_Compile(const char *filenam) {
     fs = kfilelength(fp);
 
     initprintf("Compiling: %s (%d bytes)\n",filenam,fs);
+
+    flushlogwindow = 0;
 
     startcompiletime = getticks();
 
@@ -5617,8 +5761,6 @@ void C_Compile(const char *filenam) {
 
         C_SetScriptSize(g_scriptPtr-script+8);
 
-        flushlogwindow = 0;
-
         initprintf("Script compiled in %dms\n", getticks() - startcompiletime);
 
         initprintf("Compiled code size: %ld*%d bytes, version %s\n",
@@ -5689,11 +5831,13 @@ void C_Compile(const char *filenam) {
                 "^02%s^02 mutilated %s",
                 "^02%s^02 murdered %s",
                 "^02%s^02 neutered %s",
+                "^02%s^02 punted %s",
                 "^02%s^02 reamed %s",
                 "^02%s^02 ripped %s^02 a new orifice",
                 "^02%s^02 rocked %s",
                 "^02%s^02 sent %s^02 to hell",
                 "^02%s^02 shredded %s",
+                "^02%s^02 slashed %s",
                 "^02%s^02 slaughtered %s",
                 "^02%s^02 sliced %s",
                 "^02%s^02 smacked %s around",

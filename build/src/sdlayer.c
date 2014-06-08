@@ -6,6 +6,7 @@
 
 #include <stdlib.h>
 #include <math.h>
+#include <signal.h>
 #include "sdl_inc.h"
 #include "compat.h"
 #include "sdlayer.h"
@@ -88,6 +89,7 @@ static char keytranslation[SDL_NUM_SCANCODES];
 static int32_t buildkeytranslationtable(void);
 
 //static SDL_Surface * loadtarga(const char *fn);		// for loading the icon
+static SDL_Surface * appicon = NULL;
 static SDL_Surface * loadappicon(void);
 
 int32_t wm_msgbox(char *name, char *fmt, ...)
@@ -171,6 +173,9 @@ int32_t main(int32_t argc, char *argv[])
     char *argp;
     FILE *fp;
 
+    nedcreatepool(SYSTEM_POOL_SIZE, -1);
+//    atexit(neddestroysyspool);
+
     buildkeytranslationtable();
 
 #ifdef HAVE_GTK2
@@ -221,6 +226,20 @@ void setvsync(int32_t sync)
 }
 #endif
 
+static void attach_debugger_here(void){}
+
+static void sighandler(int signum)
+{
+//    if (signum==SIGSEGV)
+    {
+        SDL_WM_GrabInput(SDL_GRAB_OFF);
+        SDL_ShowCursor(SDL_ENABLE);
+        attach_debugger_here();
+        uninitsystem();
+        exit(1);
+    }
+}
+
 //
 // initsystem() -- init SDL systems
 //
@@ -259,6 +278,10 @@ int32_t initsystem(void)
         return -1;
     }
 
+    signal(SIGSEGV, sighandler);
+    signal(SIGABRT, sighandler);
+    signal(SIGFPE, sighandler);
+
     atexit(uninitsystem);
 
     frameplace = 0;
@@ -273,16 +296,11 @@ int32_t initsystem(void)
 #endif
 
 #ifndef __APPLE__
-    {
-        SDL_Surface *icon;
-        //icon = loadtarga("icon.tga");
-        icon = loadappicon();
-        if (icon)
-        {
-            SDL_WM_SetIcon(icon, 0);
-            SDL_FreeSurface(icon);
-        }
-    }
+        
+    //icon = loadtarga("icon.tga");
+    appicon = loadappicon();
+    if (appicon)
+        SDL_WM_SetIcon(appicon, 0);
 #endif
 
     if (SDL_VideoDriverName(drvname, 32))
@@ -318,6 +336,12 @@ void uninitsystem(void)
     uninitmouse();
     uninittimer();
 
+    if (appicon)
+    {
+        SDL_FreeSurface(appicon);
+        appicon = NULL;
+    }
+
     SDL_Quit();
 
 #ifdef USE_OPENGL
@@ -334,7 +358,6 @@ void initprintf(const char *f, ...)
     va_list va;
     char buf[1024];
     static char dabuf[1024];
-    static int32_t cnt = 0;
 
     va_start(va, f);
     Bvsnprintf(buf, 1024, f, va);
@@ -351,7 +374,7 @@ void initprintf(const char *f, ...)
 
     Bstrcat(dabuf,buf);
 
-    if (++cnt < 16 || flushlogwindow || Bstrlen(dabuf) > 768)
+    if (flushlogwindow || Bstrlen(dabuf) > 768)
     {
         startwin_puts(dabuf);
         startwin_idle(NULL);
@@ -469,8 +492,7 @@ void uninitinput(void)
 
 const char *getkeyname(int32_t num)
 {
-    if ((unsigned)num >= 256) return NULL;
-    return key_names[num];
+    return ((unsigned)num >= 256) ? NULL : key_names[num];
 }
 
 const char *getjoyname(int32_t what, int32_t num)
@@ -504,11 +526,14 @@ const char *getjoyname(int32_t what, int32_t num)
 //
 char bgetchar(void)
 {
-    char c;
-    if (keyasciififoplc == keyasciififoend) return 0;
-    c = keyasciififo[keyasciififoplc];
-    keyasciififoplc = ((keyasciififoplc+1)&(KEYFIFOSIZ-1));
-    return c;
+    if (keyasciififoplc == keyasciififoend)
+        return 0;
+
+    {
+        char c = keyasciififo[keyasciififoplc];
+        keyasciififoplc = ((keyasciififoplc+1)&(KEYFIFOSIZ-1));
+        return c;
+    }
 }
 
 int32_t bkbhit(void)
@@ -806,7 +831,7 @@ void getvalidmodes(void)
         pf.BitsPerPixel = cdepths[j];
         pf.BytesPerPixel = cdepths[j] >> 3;
 
-        modes = SDL_ListModes(&pf, SURFACE_FLAGS
+        modes = SDL_ListModes(NULL, SURFACE_FLAGS //! Pandora doesn't like &pf
 #if (SDL_MAJOR_VERSION == 1 && SDL_MINOR_VERSION < 3)
                               | SDL_FULLSCREEN // not implemented/working in SDL 1.3 SDL_compat.c
 #endif
@@ -946,7 +971,7 @@ int32_t setvideomode(int32_t x, int32_t y, int32_t c, int32_t fs)
     }
 
     if (checkvideomode(&x,&y,c,fs,0) < 0) return -1;
-	fs = 1; //! dirty hack to make it run fullscreen on OpenPandora
+
     startwin_close();
 
     if (mouseacquired)
@@ -1112,6 +1137,29 @@ int32_t setvideomode(int32_t x, int32_t y, int32_t c, int32_t fs)
         glinfo.version    = (const char *)bglGetString(GL_VERSION);
         glinfo.extensions = (const char *)bglGetString(GL_EXTENSIONS);
 
+#ifdef POLYMER
+        if (!Bstrcmp(glinfo.vendor,"ATI Technologies Inc.")) {
+            pr_ati_fboworkaround = 1;
+            initprintf("Enabling ATI FBO color attachment workaround.\n");
+
+            if (!Bstrncmp(glinfo.renderer,"Radeon X1", 9)) {
+                pr_ati_nodepthoffset = 1;
+                initprintf("Enabling ATI R520 polygon offset workaround.\n");
+            } else
+                pr_ati_nodepthoffset = 0;
+#ifdef __APPLE__
+			//See bug description at http://lists.apple.com/archives/mac-opengl/2005/Oct/msg00169.html
+            if (!Bstrncmp(glinfo.renderer,"ATI Radeon 9600", 15)) {
+                pr_ati_textureformat_one = 1;
+                initprintf("Enabling ATI Radeon 9600 texture format workaround.\n");
+            } else
+                pr_ati_textureformat_one = 0;
+#endif
+        } else
+            pr_ati_fboworkaround = 0;
+#endif
+
+
         glinfo.maxanisotropy = 1.0;
         glinfo.bgra = 0;
         glinfo.texcompr = 0;
@@ -1200,6 +1248,14 @@ int32_t setvideomode(int32_t x, int32_t y, int32_t c, int32_t fs)
             else if (!Bstrcmp((char *)p2, "GL_EXT_gpu_shader4"))
             {
                 glinfo.sm4 = 1;
+            }
+            else if (!Bstrcmp((char *)p2, "GL_ARB_occlusion_query"))
+            {
+                glinfo.occlusionqueries = 1;
+            }
+            else if (!Bstrcmp((char *)p2, "GL_ARB_shader_objects"))
+            {
+                glinfo.glsl = 1;
             }
         }
         Bfree(p);
@@ -1399,7 +1455,8 @@ int32_t setpalette(int32_t start, int32_t num)
         curpalettefaded[i].f = pal[i].unused = 0;
 
     //return SDL_SetPalette(sdl_surface, SDL_LOGPAL|SDL_PHYSPAL, pal, 0, 256);
-    return SDL_SetColors(sdl_surface, pal, 0, 256);
+    
+    return sdl_surface ? SDL_SetColors(sdl_surface, pal, 0, 256) : 0;
 }
 
 //
@@ -1481,19 +1538,23 @@ static SDL_Surface * loadappicon(void)
 // handleevents() -- process the SDL message queue
 //   returns !0 if there was an important event worth checking (like quitting)
 //
+
+static inline void SetKey(int32_t key, int32_t state)
+{
+    keystatus[remap[key]] = state;
+
+    if (state) 
+    {
+        keyfifo[keyfifoend] = remap[key];
+        keyfifo[(keyfifoend+1)&(KEYFIFOSIZ-1)] = state;
+        keyfifoend = ((keyfifoend+2)&(KEYFIFOSIZ-1));
+    }
+}
+
 int32_t handleevents(void)
 {
     int32_t code, rv=0, j;
     SDL_Event ev;
-
-#define SetKey(key,state) { \
-        keystatus[remap[key]] = state; \
-		if (state) { \
-        keyfifo[keyfifoend] = remap[key]; \
-	keyfifo[(keyfifoend+1)&(KEYFIFOSIZ-1)] = state; \
-	keyfifoend = ((keyfifoend+2)&(KEYFIFOSIZ-1)); \
-		} \
-}
 
     while (SDL_PollEvent(&ev))
     {
@@ -1775,7 +1836,12 @@ int32_t handleevents(void)
 
 inline void idle(void)
 {
-    usleep(1);
+    usleep(1000);
+}
+
+inline void idle_waitevent(void)
+{
+    SDL_WaitEvent(NULL);
 }
 
 #if (SDL_MAJOR_VERSION == 1 && SDL_MINOR_VERSION < 3) // SDL 1.2
@@ -2033,7 +2099,7 @@ static int32_t buildkeytranslationtable(void)
 #if defined _WIN32
 # define WIN32_LEAN_AND_MEAN
 # include <windows.h>
-#elif defined __linux || defined __FreeBSD__ || defined __NetBSD__ || defined __OpenBSD__
+#elif defined __linux || defined __FreeBSD__ || defined __NetBSD__ || defined __OpenBSD__ || defined __APPLE__
 # include <sys/mman.h>
 #endif
 
@@ -2048,7 +2114,7 @@ void makeasmwriteable(void)
         initprint("Error making code writeable\n");
         return;
     }
-# elif defined __linux || defined __FreeBSD__ || defined __NetBSD__ || defined __OpenBSD__
+# elif defined __linux || defined __FreeBSD__ || defined __NetBSD__ || defined __OpenBSD__ || defined __APPLE__
     int32_t pagesize;
     size_t dep_begin_page;
     pagesize = sysconf(_SC_PAGE_SIZE);

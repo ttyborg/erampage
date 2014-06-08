@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "osdfuncs.h"
 #include <ctype.h>
 #include <limits.h>
+#include "enet/enet.h"
 
 extern int32_t voting, g_doQuickSave;
 struct osdcmd_cheatsinfo osdcmd_cheatsinfo_stat;
@@ -39,11 +40,13 @@ float r_ambientlight = 1.0, r_ambientlightrecip = 1.0;
 extern int32_t althud_numbertile, althud_numberpal, althud_shadows, althud_flashing, hud_glowingquotes;
 extern int32_t hud_showmapname;
 extern int32_t r_maxfps;
-extern int32_t g_frameDelay;
+extern uint32_t g_frameDelay;
+extern int32_t demorec_diffs_cvar, demorec_force_cvar, demorec_seeds_cvar, demoplay_diffs, demoplay_showsync;
+extern int32_t demorec_difftics_cvar, demorec_diffcompress_cvar, demorec_synccompress_cvar;
 
 static inline int32_t osdcmd_quit(const osdfuncparm_t *parm) {
     UNREFERENCED_PARAMETER(parm);
-    Net_SendQuit();
+    G_GameQuit();
     return OSDCMD_OK;
 }
 
@@ -92,7 +95,7 @@ static int32_t osdcmd_changelevel(const osdfuncparm_t *parm) {
     }
 
     if (numplayers > 1) {
-        if (myconnectindex == connecthead && g_networkBroadcastMode == 0)
+        if (g_netServer)
             Net_NewGame(volume,level);
         else if (voting == -1) {
             ud.m_volume_number = volume;
@@ -115,10 +118,7 @@ static int32_t osdcmd_changelevel(const osdfuncparm_t *parm) {
                 tempbuf[2] = ud.m_volume_number;
                 tempbuf[3] = ud.m_level_number;
 
-                TRAVERSE_CONNECT(i) {
-                    if (i != myconnectindex) mmulti_sendpacket(i,tempbuf,4);
-                    if ((!g_networkBroadcastMode) && (myconnectindex != connecthead)) break; //slaves in M/S mode only send to master
-                }
+                enet_peer_send(g_netClientPeer, CHAN_GAMESTATE, enet_packet_create(tempbuf, 4, ENET_PACKET_FLAG_RELIABLE));
             }
             if ((GametypeFlags[ud.m_coop] & GAMETYPE_PLAYERSFRIENDLY) && !(GametypeFlags[ud.m_coop] & GAMETYPE_TDM))
                 ud.m_noexits = 0;
@@ -227,7 +227,7 @@ static int32_t osdcmd_map(const osdfuncparm_t *parm) {
     strcat(boardfilename, filename);
 
     if (numplayers > 1) {
-        if (myconnectindex == connecthead && g_networkBroadcastMode == 0) {
+        if (g_netServer) {
             Net_SendUserMapName();
             ud.m_volume_number = 0;
             ud.m_level_number = 7;
@@ -254,10 +254,7 @@ static int32_t osdcmd_map(const osdfuncparm_t *parm) {
                 tempbuf[2] = ud.m_volume_number;
                 tempbuf[3] = ud.m_level_number;
 
-                TRAVERSE_CONNECT(i) {
-                    if (i != myconnectindex) mmulti_sendpacket(i,tempbuf,4);
-                    if ((!g_networkBroadcastMode) && (myconnectindex != connecthead)) break; //slaves in M/S mode only send to master
-                }
+                enet_peer_send(g_netClientPeer, CHAN_GAMESTATE, enet_packet_create(tempbuf, 4, ENET_PACKET_FLAG_RELIABLE));
             }
             if ((GametypeFlags[ud.m_coop] & GAMETYPE_PLAYERSFRIENDLY) && !(GametypeFlags[ud.m_coop] & GAMETYPE_TDM))
                 ud.m_noexits = 0;
@@ -338,41 +335,12 @@ static int32_t osdcmd_fileinfo(const osdfuncparm_t *parm) {
     return OSDCMD_OK;
 }
 
-/*
-static int32_t osdcmd_rate(const osdfuncparm_t *parm)
-{
-#ifndef RANCID_NETWORKING
-    int32_t i;
-
-    if (parm->numparms == 0)
-    {
-        OSD_Printf("\"rate\" is \"%d\"\n", packetrate);
-        return OSDCMD_SHOWHELP;
-    }
-    else if (parm->numparms != 1) return OSDCMD_SHOWHELP;
-
-    i = Batol(parm->parms[0]);
-
-    if (i >= 40 && i <= 1000)
-    {
-        packetrate = i;
-        OSD_Printf("rate %d\n", packetrate);
-    }
-    else OSD_Printf("rate: value out of range\n");
-#endif
-    UNREFERENCED_PARAMETER(parm);
-    return OSDCMD_OK;
-}
-*/
-
 static int32_t osdcmd_restartsound(const osdfuncparm_t *parm) {
     UNREFERENCED_PARAMETER(parm);
     S_SoundShutdown();
     S_MusicShutdown();
 
-    initprintf("Initializing music...\n");
     S_MusicStartup();
-    initprintf("Initializing sound...\n");
     S_SoundStartup();
 
     FX_StopAllSounds();
@@ -672,7 +640,7 @@ static int32_t osdcmd_give(const osdfuncparm_t *parm) {
             P_AddAmmo(i,g_player[myconnectindex].ps,g_player[myconnectindex].ps->max_ammo_amount[i]);
         return OSDCMD_OK;
     } else if (!Bstrcasecmp(parm->parms[0], "armor")) {
-        g_player[myconnectindex].ps->shield_amount = 100;
+        g_player[myconnectindex].ps->inv_amount[GET_SHIELD] = 100;
         return OSDCMD_OK;
     } else if (!Bstrcasecmp(parm->parms[0], "keys")) {
         osdcmd_cheatsinfo_stat.cheatnum = 23;
@@ -703,6 +671,21 @@ void onvideomodechange(int32_t newmode) {
         pal = g_player[screenpeek].ps->palette;
     }
 
+#ifdef POLYMER
+    if (getrendermode() == 4) {
+        int32_t i = 0;
+
+        while (i < MAXSPRITES) {
+            if (ActorExtra[i].lightptr) {
+                polymer_deletelight(ActorExtra[i].lightId);
+                ActorExtra[i].lightptr = NULL;
+                ActorExtra[i].lightId = -1;
+            }
+            i++;
+        }
+    }
+#endif
+
     setbrightness(ud.brightness>>2, pal, 0);
     g_restorePalette = 1;
     g_crosshairSum = 0;
@@ -726,7 +709,7 @@ static int32_t osdcmd_name(const osdfuncparm_t *parm) {
 
     OSD_Printf("name %s\n",szPlayerName);
 
-    Net_SendPlayerName();
+    Net_SendClientInfo();
 
     return OSDCMD_OK;
 }
@@ -1004,9 +987,6 @@ static int32_t osdcmd_screenshot(const osdfuncparm_t *parm) {
     return OSDCMD_OK;
 }
 
-extern void G_SaveMapState(mapstate_t *save);
-extern void G_RestoreMapState(mapstate_t *save);
-
 /*
 static int32_t osdcmd_savestate(const osdfuncparm_t *parm)
 {
@@ -1042,6 +1022,128 @@ static int32_t osdcmd_inittimer(const osdfuncparm_t *parm) {
     g_timerTicsPerSecond = j;
 
     OSD_Printf("%s\n",parm->raw);
+    return OSDCMD_OK;
+}
+
+static int32_t osdcmd_disconnect(const osdfuncparm_t *parm) {
+    extern int32_t g_netDisconnect;
+    UNREFERENCED_PARAMETER(parm);
+    g_netDisconnect = 1;
+    return OSDCMD_OK;
+}
+
+static int32_t osdcmd_connect(const osdfuncparm_t *parm) {
+    if (parm->numparms != 1)
+        return OSDCMD_SHOWHELP;
+
+    Net_Connect(parm->parms[0]);
+    G_BackToMenu();
+    return OSDCMD_OK;
+}
+
+static int32_t osdcmd_password(const osdfuncparm_t *parm) {
+    extern char g_netPassword[32];
+
+    if (parm->numparms < 1) {
+        Bmemset(g_netPassword, 0, sizeof(g_netPassword));
+        return OSDCMD_OK;
+    }
+    Bstrncpy(g_netPassword, (char *)(parm->raw) + 9, sizeof(g_netPassword)-1);
+
+    return OSDCMD_OK;
+}
+
+static int32_t osdcmd_listplayers(const osdfuncparm_t *parm) {
+    ENetPeer * currentPeer;
+    char ipaddr[32];
+
+    if (parm->numparms != 0)
+        return OSDCMD_SHOWHELP;
+
+    if (!g_netServer) {
+        initprintf("You are not the server.\n");
+        return OSDCMD_OK;
+    }
+
+    for (currentPeer = g_netServer -> peers;
+            currentPeer < & g_netServer -> peers [g_netServer -> peerCount];
+            ++ currentPeer) {
+        if (currentPeer -> state != ENET_PEER_STATE_CONNECTED)
+            continue;
+
+        enet_address_get_host_ip(&currentPeer->address, ipaddr, sizeof(ipaddr));
+        initprintf("%x %s %s\n", currentPeer->address.host, ipaddr,
+                   g_player[(intptr_t)currentPeer->data].user_name);
+    }
+
+    return OSDCMD_OK;
+}
+
+static int32_t osdcmd_kick(const osdfuncparm_t *parm) {
+    ENetPeer * currentPeer;
+    uint32_t hexaddr;
+
+    if (parm->numparms != 1)
+        return OSDCMD_SHOWHELP;
+
+    if (!g_netServer) {
+        initprintf("You are not the server.\n");
+        return OSDCMD_OK;
+    }
+
+    for (currentPeer = g_netServer -> peers;
+            currentPeer < & g_netServer -> peers [g_netServer -> peerCount];
+            ++ currentPeer) {
+        if (currentPeer -> state != ENET_PEER_STATE_CONNECTED)
+            continue;
+
+        sscanf(parm->parms[0],"%" PRIxPTR "", &hexaddr);
+
+        if (currentPeer->address.host == hexaddr) {
+            initprintf("Kicking %x (%s)\n", currentPeer->address.host,
+                       g_player[(intptr_t)currentPeer->data].user_name);
+            enet_peer_disconnect(currentPeer, DISC_KICKED);
+            return OSDCMD_OK;
+        }
+    }
+
+    initprintf("Player %s not found!\n", parm->parms[0]);
+    return OSDCMD_OK;
+}
+
+static int32_t osdcmd_kickban(const osdfuncparm_t *parm) {
+    ENetPeer * currentPeer;
+    uint32_t hexaddr;
+
+    if (parm->numparms != 1)
+        return OSDCMD_SHOWHELP;
+
+    if (!g_netServer) {
+        initprintf("You are not the server.\n");
+        return OSDCMD_OK;
+    }
+
+    for (currentPeer = g_netServer -> peers;
+            currentPeer < & g_netServer -> peers [g_netServer -> peerCount];
+            ++ currentPeer) {
+        if (currentPeer -> state != ENET_PEER_STATE_CONNECTED)
+            continue;
+
+        sscanf(parm->parms[0],"%" PRIxPTR "", &hexaddr);
+
+        if (currentPeer->address.host == hexaddr) {
+            char ipaddr[32];
+
+            enet_address_get_host_ip(&currentPeer->address, ipaddr, sizeof(ipaddr));
+            initprintf("Host %s is now banned.\n", ipaddr);
+            initprintf("Kicking %x (%s)\n", currentPeer->address.host,
+                       g_player[(intptr_t)currentPeer->data].user_name);
+            enet_peer_disconnect(currentPeer, DISC_BANNED);
+            return OSDCMD_OK;
+        }
+    }
+
+    initprintf("Player %s not found!\n", parm->parms[0]);
     return OSDCMD_OK;
 }
 
@@ -1092,9 +1194,14 @@ static int32_t osdcmd_cvar_set_game(const osdfuncparm_t *parm) {
             G_UpdateScreenArea();
 
             return r;
+        } else if (!Bstrcasecmp(parm->name, "skill")) {
+            if (numplayers > 1)
+                return r;
+
+            ud.m_player_skill = ud.player_skill;
+
+            return r;
         }
-
-
     }
 
 #endif
@@ -1157,6 +1264,8 @@ int32_t registerosdcommands(void) {
 
         { "sensitivity","sensitivity <value>: changes the mouse sensitivity", (void*)&CONTROL_MouseSensitivity, CVAR_FLOAT|CVAR_FUNCPTR, 0, 0, 25 },
 
+        { "skill","skill <value>: changes the game skill setting", (void*)&ud.player_skill, CVAR_INT|CVAR_FUNCPTR|CVAR_NOMULTI, 0, 0, 5 },
+
         { "snd_ambience", "snd_ambience: enables/disables ambient sounds", (void*)&ud.config.AmbienceToggle, CVAR_BOOL, 0, 0, 1 },
         { "snd_duketalk", "snd_duketalk: enables/disables Duke's speech", (void*)&ud.config.VoiceToggle, CVAR_INT, 0, 0, 5 },
         { "snd_fxvolume", "snd_fxvolume: volume of sound effects", (void*)&ud.config.FXVolume, CVAR_INT, 0, 0, 255 },
@@ -1164,12 +1273,20 @@ int32_t registerosdcommands(void) {
         { "snd_musvolume", "snd_musvolume: volume of midi music", (void*)&ud.config.MusicVolume, CVAR_INT, 0, 0, 255 },
         { "snd_numbits", "snd_numbits: sound bits", (void*)&ud.config.NumBits, CVAR_INT, 0, 8, 16 },
         { "snd_numchannels", "snd_numchannels: the number of sound channels", (void*)&ud.config.NumChannels, CVAR_INT, 0, 0, 2 },
-        { "snd_numvoices", "snd_numvoices: the number of concurrent sounds", (void*)&ud.config.NumVoices, CVAR_INT, 0, 0, 32 },
+        { "snd_numvoices", "snd_numvoices: the number of concurrent sounds", (void*)&ud.config.NumVoices, CVAR_INT, 0, 0, 96 },
         { "snd_reversestereo", "snd_reversestereo: reverses the stereo channels", (void*)&ud.config.ReverseStereo, CVAR_BOOL, 0, 0, 16 },
         { "vid_gamma","vid_gamma <gamma>: adjusts gamma ramp",(void*)&vid_gamma, CVAR_DOUBLE|CVAR_FUNCPTR, 0, 0, 10 },
         { "vid_contrast","vid_contrast <gamma>: adjusts gamma ramp",(void*)&vid_contrast, CVAR_DOUBLE|CVAR_FUNCPTR, 0, 0, 10 },
         { "vid_brightness","vid_brightness <gamma>: adjusts gamma ramp",(void*)&vid_brightness, CVAR_DOUBLE|CVAR_FUNCPTR, 0, 0, 10 },
 
+        { "demorec_diffs","demorec_diffs: enable/disable diff recording in demos",(void*)&demorec_diffs_cvar, CVAR_BOOL, 0, 0, 1 },
+        { "demorec_force","demorec_force: enable/disable forced demo recording",(void*)&demorec_force_cvar, CVAR_BOOL|CVAR_NOSAVE, 0, 0, 1 },
+        { "demorec_difftics","demorec_difftics <number>: sets game tic interval after which a diff is recorded",(void*)&demorec_difftics_cvar, CVAR_INT, 0, 2, 60*(TICRATE/TICSPERFRAME) },
+        { "demorec_diffcompress","demorec_diffcompress <number>: Compression method for diffs. (0: none, 1: KSLZW)",(void*)&demorec_diffcompress_cvar, CVAR_INT, 0, 0, 1 },
+        { "demorec_synccompress","demorec_synccompress <number>: Compression method for input. (0: none, 1: KSLZW)",(void*)&demorec_synccompress_cvar, CVAR_INT, 0, 0, 1 },
+        { "demorec_seeds","demorec_seeds: enable/disable recording of random seed for later sync checking",(void*)&demorec_seeds_cvar, CVAR_BOOL, 0, 0, 1 },
+        { "demoplay_diffs","demoplay_diffs: enable/disable application of diffs in demo playback",(void*)&demoplay_diffs, CVAR_BOOL, 0, 0, 1 },
+        { "demoplay_showsync","demoplay_showsync: enable/disable display of sync status",(void*)&demoplay_showsync, CVAR_BOOL, 0, 0, 1 },
     };
 
     osdcmd_cheatsinfo_stat.cheatnum = -1;
@@ -1192,6 +1309,9 @@ int32_t registerosdcommands(void) {
     OSD_RegisterFunction("bind","bind <key> <string>: associates a keypress with a string of console input. Type \"bind showkeys\" for a list of keys and \"listsymbols\" for a list of valid console commands.", osdcmd_bind);
     OSD_RegisterFunction("cmenu","cmenu <#>: jumps to menu", osdcmd_cmenu);
     OSD_RegisterFunction("crosshaircolor","crosshaircolor: changes the crosshair color", osdcmd_crosshaircolor);
+
+    OSD_RegisterFunction("connect","connect: connects to a multiplayer game", osdcmd_connect);
+    OSD_RegisterFunction("disconnect","disconnect: disconnects from the local multiplayer game", osdcmd_disconnect);
 
     OSD_RegisterFunction("echo","echo [text]: echoes text to the console", osdcmd_echo);
     OSD_RegisterFunction("fileinfo","fileinfo <file>: gets a file's information", osdcmd_fileinfo);
@@ -1217,8 +1337,15 @@ int32_t registerosdcommands(void) {
     OSD_RegisterFunction("initgroupfile","initgroupfile <path>: adds a grp file into the game filesystem", osdcmd_initgroupfile);
     OSD_RegisterFunction("inittimer","debug", osdcmd_inittimer);
 
+    OSD_RegisterFunction("kick","kick <id>: kicks a multiplayer client.  See listplayers.", osdcmd_kick);
+    OSD_RegisterFunction("kickban","kickban <id>: kicks a multiplayer client and prevents them from reconnecting.  See listplayers.", osdcmd_kickban);
+
+    OSD_RegisterFunction("listplayers","listplayers: lists currently connected multiplayer clients", osdcmd_listplayers);
+
     OSD_RegisterFunction("name","name: change your multiplayer nickname", osdcmd_name);
     OSD_RegisterFunction("noclip","noclip: toggles clipping mode", osdcmd_noclip);
+
+    OSD_RegisterFunction("password","password: sets multiplayer game password", osdcmd_password);
 
     OSD_RegisterFunction("quicksave","quicksave: performs a quick save", osdcmd_quicksave);
     OSD_RegisterFunction("quickload","quickload: performs a quick load", osdcmd_quickload);

@@ -22,26 +22,23 @@ char hicfirstinit = 0;
 //
 hicreplctyp * hicfindsubst(int32_t picnum, int32_t palnum, int32_t skybox)
 {
-    hicreplctyp *hr;
-
-    if (!hicfirstinit) return NULL;
-    if ((uint32_t)picnum >= (uint32_t)MAXTILES) return NULL;
+    if (!hicfirstinit || (uint32_t)picnum >= (uint32_t)MAXTILES) return NULL;
 
     do
     {
-        for (hr = hicreplc[picnum]; hr; hr = hr->next)
+        if (skybox)
         {
-            if (hr->palnum == palnum)
-            {
-                if (skybox)
-                {
-                    if (hr->skybox && !hr->skybox->ignore) return hr;
-                }
-                else
-                {
-                    if (!hr->ignore) return hr;
-                }
-            }
+            hicreplctyp *hr = hicreplc[picnum];
+            for (; hr; hr = hr->next)
+                if (hr->palnum == palnum && hr->skybox && !hr->skybox->ignore)
+                    return hr;
+        }
+        else
+        {
+            hicreplctyp *hr = hicreplc[picnum];
+            for (; hr; hr = hr->next)
+                if (hr->palnum == palnum && !hr->ignore)
+                    return hr;
         }
 
         if (!palnum || palnum >= (MAXPALOOKUPS - RESERVEDPALS)) break;
@@ -81,13 +78,13 @@ void hicinit(void)
                     {
                         if (hr->skybox->face[j])
                         {
-                            free(hr->skybox->face[j]);
+                            Bfree(hr->skybox->face[j]);
                         }
                     }
-                    free(hr->skybox);
+                    Bfree(hr->skybox);
                 }
-                if (hr->filename) free(hr->filename);
-                free(hr);
+                if (hr->filename) Bfree(hr->filename);
+                Bfree(hr);
 
                 hr = next;
             }
@@ -137,20 +134,20 @@ int32_t hicsetsubsttex(int32_t picnum, int32_t palnum, char *filen, float alphac
     if (!hr)
     {
         // no replacement yet defined
-        hrn = (hicreplctyp *)calloc(1,sizeof(hicreplctyp));
+        hrn = (hicreplctyp *)Bcalloc(1,sizeof(hicreplctyp));
         if (!hrn) return -1;
         hrn->palnum = palnum;
     }
     else hrn = hr;
 
     // store into hicreplc the details for this replacement
-    if (hrn->filename) free(hrn->filename);
+    if (hrn->filename) Bfree(hrn->filename);
 
-    hrn->filename = strdup(filen);
+    hrn->filename = Bstrdup(filen);
     if (!hrn->filename)
     {
         if (hrn->skybox) return -1;	// don't free the base structure if there's a skybox defined
-        if (hr == NULL) free(hrn);	// not yet a link in the chain
+        if (hr == NULL) Bfree(hrn);	// not yet a link in the chain
         return -1;
     }
     hrn->ignore = 0;
@@ -195,7 +192,7 @@ int32_t hicsetskybox(int32_t picnum, int32_t palnum, char *faces[6])
     if (!hr)
     {
         // no replacement yet defined
-        hrn = (hicreplctyp *)calloc(1,sizeof(hicreplctyp));
+        hrn = (hicreplctyp *)Bcalloc(1,sizeof(hicreplctyp));
         if (!hrn) return -1;
 
         hrn->palnum = palnum;
@@ -204,10 +201,10 @@ int32_t hicsetskybox(int32_t picnum, int32_t palnum, char *faces[6])
 
     if (!hrn->skybox)
     {
-        hrn->skybox = (struct hicskybox_t *)calloc(1,sizeof(struct hicskybox_t));
+        hrn->skybox = (struct hicskybox_t *)Bcalloc(1,sizeof(struct hicskybox_t));
         if (!hrn->skybox)
         {
-            if (hr == NULL) free(hrn);	// not yet a link in the chain
+            if (hr == NULL) Bfree(hrn);	// not yet a link in the chain
             return -1;
         }
     }
@@ -216,21 +213,21 @@ int32_t hicsetskybox(int32_t picnum, int32_t palnum, char *faces[6])
         for (j=5; j>=0; j--)
         {
             if (hrn->skybox->face[j])
-                free(hrn->skybox->face[j]);
+                Bfree(hrn->skybox->face[j]);
         }
     }
 
     // store each face's filename
     for (j=0; j<6; j++)
     {
-        hrn->skybox->face[j] = strdup(faces[j]);
+        hrn->skybox->face[j] = Bstrdup(faces[j]);
         if (!hrn->skybox->face[j])
         {
             for (--j; j>=0; --j)	// free any previous faces
-                free(hrn->skybox->face[j]);
-            free(hrn->skybox);
+                Bfree(hrn->skybox->face[j]);
+            Bfree(hrn->skybox);
             hrn->skybox = NULL;
-            if (hr == NULL) free(hrn);
+            if (hr == NULL) Bfree(hrn);
             return -1;
         }
     }
@@ -265,19 +262,19 @@ int32_t hicclearsubst(int32_t picnum, int32_t palnum)
 
     if (!hr) return 0;
 
-    if (hr->filename) free(hr->filename);
+    if (hr->filename) Bfree(hr->filename);
     if (hr->skybox)
     {
         int32_t i;
         for (i=5; i>=0; i--)
             if (hr->skybox->face[i])
-                free(hr->skybox->face[i]);
-        free(hr->skybox);
+                Bfree(hr->skybox->face[i]);
+        Bfree(hr->skybox);
     }
 
     if (hrn) hrn->next = hr->next;
     else hicreplc[picnum] = hr->next;
-    free(hr);
+    Bfree(hr);
 
     return 0;
 }

@@ -36,9 +36,11 @@ extern int32_t      pr_specularmapping;
 extern int32_t      pr_shadows;
 extern int32_t      pr_shadowcount;
 extern int32_t      pr_shadowdetail;
+extern int32_t      pr_shadowfiltering;
 extern int32_t      pr_maxlightpasses;
 extern int32_t      pr_maxlightpriority;
 extern int32_t      pr_fov;
+extern float        pr_customaspect;
 extern int32_t      pr_billboardingmode;
 extern int32_t      pr_verbosity;
 extern int32_t      pr_wireframe;
@@ -50,6 +52,13 @@ extern float        pr_parallaxbias;
 extern int32_t      pr_overridespecular;
 extern float        pr_specularpower;
 extern float        pr_specularfactor;
+extern int32_t      pr_ati_fboworkaround;
+extern int32_t      pr_ati_nodepthoffset;
+#ifdef __APPLE__
+extern int32_t      pr_ati_textureformat_one;
+#endif
+
+extern int32_t      r_pr_maxlightpasses;
 
 // MATERIAL
 typedef enum {
@@ -77,10 +86,10 @@ typedef struct      s_prmaterial {
     // PR_BIT_ANIM_INTERPOLATION
     GLfloat         frameprogress;
     GLfloat*        nextframedata;
-    GLsizei         nextframedatastride;
     // PR_BIT_NORMAL_MAP
     GLuint          normalmap;
     GLfloat         normalbias[2];
+    GLfloat*        tbn;
     // PR_BIT_DIFFUSE_MAP
     GLuint          diffusemap;
     GLfloat         diffusescale[2];
@@ -88,7 +97,7 @@ typedef struct      s_prmaterial {
     GLuint          detailmap;
     GLfloat         detailscale[2];
     // PR_BIT_DIFFUSE_MODULATION
-    GLfloat         diffusemodulation[4];
+    GLubyte         diffusemodulation[4];
     // PR_BIT_SPECULAR_MAP
     GLuint          specmap;
     // PR_BIT_SPECULAR_MATERIAL
@@ -149,10 +158,16 @@ typedef struct      s_prprogrambit {
 }                   _prprogrambit;
 
 // LIGHTS
-#define             PR_MAXLIGHTS            128
+#define             PR_MAXLIGHTS            1024
 #define             SHADOW_DEPTH_OFFSET     30
 #define             PR_MAXLIGHTPRIORITY     6
 
+typedef struct      s_prplanelist {
+    struct s_prplane*       plane;
+    struct s_prplanelist*   n;
+}                   _prplanelist;
+
+#pragma pack(push,1)
 typedef struct      s_prlight {
     int32_t         x, y, z, horiz, range;
     int16_t         angle, faderadius, radius, sector;
@@ -164,18 +179,22 @@ typedef struct      s_prlight {
     GLfloat         transform[16];
     float           frustum[5 * 4];
     int32_t         rtindex;
-    char            isinview;
+    struct          {
+        int32_t     active      : 1;
+        int32_t     invalidate  : 1;
+        int32_t     isinview    : 1;
+    }               flags;
     GLuint          lightmap;
+    _prplanelist*   planelist;
+    int32_t         planecount;
 }                   _prlight;
 
-extern _prlight     staticlights[PR_MAXLIGHTS];
-extern int32_t      staticlightcount;
+extern _prlight     prlights[PR_MAXLIGHTS];
+extern int32_t      lightcount;
 
 extern _prlight     gamelights[PR_MAXLIGHTS];
 extern int32_t      gamelightcount;
-
-extern _prlight     framelights[PR_MAXLIGHTS];
-extern int32_t      framelightcount;
+#pragma pack(pop)
 
 // RENDER TARGETS
 typedef struct      s_prrt {
@@ -193,9 +212,7 @@ typedef struct      s_prplane {
     int32_t         vertcount;
     GLuint          vbo;
     // attributes
-    GLfloat         t[3];
-    GLfloat         b[3];
-    GLfloat         n[3];
+    GLfloat         tbn[3][3];
     GLfloat         plane[4];
     _prmaterial     material;
     // elements
@@ -203,9 +220,8 @@ typedef struct      s_prplane {
     int32_t         indicescount;
     GLuint          ivbo;
     // lights
-    char            lights[PR_MAXLIGHTS];
-    char            lightcount;
-    char            drawn;
+    int16_t         lights[PR_MAXLIGHTS];
+    uint16_t        lightcount;
 }                   _prplane;
 
 typedef struct      s_prsector {
@@ -229,7 +245,11 @@ typedef struct      s_prsector {
     int8_t          floorshade;
     char            floorpal, floorxpanning, floorypanning;
 
-    char            controlstate; // 1: up to date, 2: just allocated
+    struct          {
+        int32_t     empty       : 1;
+        int32_t     uptodate    : 1;
+        int32_t     invalidtex  : 1;
+    }               flags;
     uint32_t        invalidid;
 }                   _prsector;
 
@@ -250,7 +270,11 @@ typedef struct      s_prwall {
 
     char            underover;
     uint32_t        invalidid;
-    char            controlstate;
+    struct          {
+        int32_t     empty       : 1;
+        int32_t     uptodate    : 1;
+        int32_t     invalidtex  : 1;
+    }               flags;
 }                   _prwall;
 
 typedef struct      s_prmirror {
@@ -270,13 +294,19 @@ typedef struct      s_pranimatespritesinfo {
 int32_t             polymer_init(void);
 void                polymer_uninit(void);
 void                polymer_glinit(void);
+void                polymer_resetlights(void);
 void                polymer_loadboard(void);
 void                polymer_drawrooms(int32_t daposx, int32_t daposy, int32_t daposz, int16_t daang, int32_t dahoriz, int16_t dacursectnum);
 void                polymer_drawmasks(void);
+void                polymer_editorpick(void);
 void                polymer_rotatesprite(int32_t sx, int32_t sy, int32_t z, int16_t a, int16_t picnum, int8_t dashade, char dapalnum, char dastat, int32_t cx1, int32_t cy1, int32_t cx2, int32_t cy2);
 void                polymer_drawmaskwall(int32_t damaskwallcnt);
 void                polymer_drawsprite(int32_t snum);
 void                polymer_setanimatesprites(animatespritesptr animatesprites, int32_t x, int32_t y, int32_t a, int32_t smoothratio);
+int16_t             polymer_addlight(_prlight* light);
+void                polymer_deletelight(int16_t lighti);
+void                polymer_invalidatelights(void);
+void                polymer_texinvalidate(void);
 
 # ifdef POLYMER_C
 
@@ -286,7 +316,6 @@ static void         polymer_drawplane(_prplane* plane);
 static inline void  polymer_inb4mirror(GLfloat* buffer, GLfloat* plane);
 static void         polymer_animatesprites(void);
 static void         polymer_freeboard(void);
-static void         polymer_editorselect(void);
 // SECTORS
 static int32_t      polymer_initsector(int16_t sectnum);
 static int32_t      polymer_updatesector(int16_t sectnum);
@@ -303,35 +332,173 @@ static void         polymer_drawwall(int16_t sectnum, int16_t wallnum);
 static void         polymer_computeplane(_prplane* p);
 static inline void  polymer_crossproduct(GLfloat* in_a, GLfloat* in_b, GLfloat* out);
 static inline void  polymer_transformpoint(float* inpos, float* pos, float* matrix);
+static inline void  polymer_normalize(float* vec);
 static inline void  polymer_pokesector(int16_t sectnum);
 static void         polymer_extractfrustum(GLfloat* modelview, GLfloat* projection, float* frustum);
-static int32_t      polymer_planeinfrustum(_prplane *plane, float* frustum);
+static inline int32_t polymer_planeinfrustum(_prplane *plane, float* frustum);
 static inline void  polymer_scansprites(int16_t sectnum, spritetype* tsprite, int32_t* spritesortcnt);
 // SKIES
 static void         polymer_getsky(void);
-static void         polymer_drawsky(int16_t tilenum);
+static void         polymer_drawsky(int16_t tilenum, char palnum, int8_t shade);
 static void         polymer_initartsky(void);
-static void         polymer_drawartsky(int16_t tilenum);
+static void         polymer_drawartsky(int16_t tilenum, char palnum, int8_t shade);
 static void         polymer_drawartskyquad(int32_t p1, int32_t p2, GLfloat height);
-static void         polymer_drawskybox(int16_t tilenum);
+static void         polymer_drawskybox(int16_t tilenum, char palnum, int8_t shade);
 // MDSPRITES
 static void         polymer_drawmdsprite(spritetype *tspr);
 static void         polymer_loadmodelvbos(md3model_t* m);
 // MATERIALS
 static void         polymer_getscratchmaterial(_prmaterial* material);
 static void         polymer_getbuildmaterial(_prmaterial* material, int16_t tilenum, char pal, int8_t shade);
-static int32_t      polymer_bindmaterial(_prmaterial material, char* lights, int lightcount);
+static int32_t      polymer_bindmaterial(_prmaterial material, int16_t* lights, int lightcount);
 static void         polymer_unbindmaterial(int32_t programbits);
 static void         polymer_compileprogram(int32_t programbits);
 // LIGHTS
-static void         polymer_resetlights(void);
-static void         polymer_addlight(_prlight light);
+static void         polymer_removelight(int16_t lighti);
+static void         polymer_updatelights(void);
+static inline void  polymer_resetplanelights(_prplane* plane);
+static void         polymer_addplanelight(_prplane* plane, int16_t lighti);
+static inline void  polymer_deleteplanelight(_prplane* plane, int16_t lighti);
 static int32_t      polymer_planeinlight(_prplane* plane, _prlight* light);
-static inline void  polymer_culllight(char lightindex);
+static void         polymer_invalidateplanelights(_prplane* plane);
+static void         polymer_invalidatesectorlights(int16_t sectnum);
+static void         polymer_processspotlight(_prlight* light);
+static inline void  polymer_culllight(int16_t lighti);
 static void         polymer_prepareshadows(void);
-static void         polymer_applylights(void);
 // RENDER TARGETS
 static void         polymer_initrendertargets(int32_t count);
+
+// the following from gle/vvector.h
+
+/* ========================================================== */
+/* determinant of matrix
+ *
+ * Computes determinant of matrix m, returning d
+ */
+
+#define DETERMINANT_3X3(d,m)                    \
+{                                \
+   d = m[0][0] * (m[1][1]*m[2][2] - m[1][2] * m[2][1]);        \
+   d -= m[0][1] * (m[1][0]*m[2][2] - m[1][2] * m[2][0]);    \
+   d += m[0][2] * (m[1][0]*m[2][1] - m[1][1] * m[2][0]);    \
+}
+
+/* ========================================================== */
+/* i,j,th cofactor of a 4x4 matrix
+ *
+ */
+
+#define COFACTOR_4X4_IJ(fac,m,i,j)                 \
+{                                \
+   int ii[4], jj[4], k;                        \
+                                \
+   /* compute which row, columnt to skip */            \
+   for (k=0; k<i; k++) ii[k] = k;                \
+   for (k=i; k<3; k++) ii[k] = k+1;                \
+   for (k=0; k<j; k++) jj[k] = k;                \
+   for (k=j; k<3; k++) jj[k] = k+1;                \
+                                \
+   (fac) = m[ii[0]][jj[0]] * (m[ii[1]][jj[1]]*m[ii[2]][jj[2]]     \
+                            - m[ii[1]][jj[2]]*m[ii[2]][jj[1]]); \
+   (fac) -= m[ii[0]][jj[1]] * (m[ii[1]][jj[0]]*m[ii[2]][jj[2]]    \
+                             - m[ii[1]][jj[2]]*m[ii[2]][jj[0]]);\
+   (fac) += m[ii[0]][jj[2]] * (m[ii[1]][jj[0]]*m[ii[2]][jj[1]]    \
+                             - m[ii[1]][jj[1]]*m[ii[2]][jj[0]]);\
+                                \
+   /* compute sign */                        \
+   k = i+j;                            \
+   if ( k != (k/2)*2) {                        \
+      (fac) = -(fac);                        \
+   }                                \
+}
+
+/* ========================================================== */
+/* determinant of matrix
+ *
+ * Computes determinant of matrix m, returning d
+ */
+
+#define DETERMINANT_4X4(d,m)                    \
+{                                \
+   double cofac;                        \
+   COFACTOR_4X4_IJ (cofac, m, 0, 0);                \
+   d = m[0][0] * cofac;                        \
+   COFACTOR_4X4_IJ (cofac, m, 0, 1);                \
+   d += m[0][1] * cofac;                    \
+   COFACTOR_4X4_IJ (cofac, m, 0, 2);                \
+   d += m[0][2] * cofac;                    \
+   COFACTOR_4X4_IJ (cofac, m, 0, 3);                \
+   d += m[0][3] * cofac;                    \
+}
+
+/* ========================================================== */
+/* compute adjoint of matrix and scale
+ *
+ * Computes adjoint of matrix m, scales it by s, returning a
+ */
+
+#define SCALE_ADJOINT_3X3(a,s,m)                \
+{                                \
+   a[0][0] = (s) * (m[1][1] * m[2][2] - m[1][2] * m[2][1]);    \
+   a[1][0] = (s) * (m[1][2] * m[2][0] - m[1][0] * m[2][2]);    \
+   a[2][0] = (s) * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);    \
+                                \
+   a[0][1] = (s) * (m[0][2] * m[2][1] - m[0][1] * m[2][2]);    \
+   a[1][1] = (s) * (m[0][0] * m[2][2] - m[0][2] * m[2][0]);    \
+   a[2][1] = (s) * (m[0][1] * m[2][0] - m[0][0] * m[2][1]);    \
+                                \
+   a[0][2] = (s) * (m[0][1] * m[1][2] - m[0][2] * m[1][1]);    \
+   a[1][2] = (s) * (m[0][2] * m[1][0] - m[0][0] * m[1][2]);    \
+   a[2][2] = (s) * (m[0][0] * m[1][1] - m[0][1] * m[1][0]);    \
+}
+
+/* ========================================================== */
+/* compute adjoint of matrix and scale
+ *
+ * Computes adjoint of matrix m, scales it by s, returning a
+ */
+
+#define SCALE_ADJOINT_4X4(a,s,m)                \
+{                                \
+   int i,j;                            \
+                                \
+   for (i=0; i<4; i++) {                    \
+      for (j=0; j<4; j++) {                    \
+         COFACTOR_4X4_IJ (a[j][i], m, i, j);            \
+         a[j][i] *= s;                        \
+      }                                \
+   }                                \
+}
+
+/* ========================================================== */
+/* inverse of matrix 
+ *
+ * Compute inverse of matrix a, returning determinant m and 
+ * inverse b
+ */
+
+#define INVERT_3X3(b,det,a)            \
+{                        \
+   double tmp;                    \
+   DETERMINANT_3X3 (det, a);            \
+   tmp = 1.0 / (det);                \
+   SCALE_ADJOINT_3X3 (b, tmp, a);        \
+}
+
+/* ========================================================== */
+/* inverse of matrix 
+ *
+ * Compute inverse of matrix a, returning determinant m and 
+ * inverse b
+ */
+
+#define INVERT_4X4(b,det,a)            \
+{                        \
+   double tmp;                    \
+   DETERMINANT_4X4 (det, a);            \
+   tmp = 1.0 / (det);                \
+   SCALE_ADJOINT_4X4 (b, tmp, a);        \
+}
 
 # endif // !POLYMER_C
 

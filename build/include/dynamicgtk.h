@@ -117,12 +117,16 @@ GtkCellRenderer *(*gtk_cell_renderer_text_new)      (void);
 GtkWidget* (*gtk_check_button_new_with_mnemonic) (const gchar *label);
 
 	// gtkcombobox.h
+gint          (*gtk_combo_box_get_active)       (GtkComboBox     *combo_box);
 gboolean      (*gtk_combo_box_get_active_iter)  (GtkComboBox     *combo_box,
                                               GtkTreeIter     *iter);
+gchar        (*gtk_combo_box_get_active_text)  (GtkComboBox     *combo_box);
 GtkTreeModel *(*gtk_combo_box_get_model)        (GtkComboBox     *combo_box);
 GType         (*gtk_combo_box_get_type)         (void) G_GNUC_CONST;
 GtkWidget    *(*gtk_combo_box_new_text)         (void);
 GtkWidget    *(*gtk_combo_box_new_with_model)   (GtkTreeModel    *model);
+void          (*gtk_combo_box_set_active)       (GtkComboBox     *combo_box,
+                                              gint             index_);
 void          (*gtk_combo_box_set_active_iter)  (GtkComboBox     *combo_box,
                                               GtkTreeIter     *iter);
 
@@ -139,14 +143,6 @@ void    (*gtk_container_set_border_width)	 (GtkContainer	   *container,
 	// gtkdialog.h
 GType      (*gtk_dialog_get_type) (void) G_GNUC_CONST;
 gint (*gtk_dialog_run)                (GtkDialog *dialog);
-
-	// gtkfixed.h
-GType      (*gtk_fixed_get_type)          (void) G_GNUC_CONST;
-GtkWidget* (*gtk_fixed_new)               (void);
-void       (*gtk_fixed_put)               (GtkFixed       *fixed,
-                                        GtkWidget      *widget,
-                                        gint            x,
-                                        gint            y);
 
 	// gtkhbox.h
 GtkWidget* (*gtk_hbox_new)	     (gboolean homogeneous,
@@ -224,6 +220,22 @@ void           (*gtk_scrolled_window_set_policy)        (GtkScrolledWindow *scro
 						      GtkPolicyType      vscrollbar_policy);
 void           (*gtk_scrolled_window_set_shadow_type)   (GtkScrolledWindow *scrolled_window,
                                                       GtkShadowType      type);
+	// gtktable.h
+GType	   (*gtk_table_get_type)	      (void) G_GNUC_CONST;
+GtkWidget* (*gtk_table_new)	      (guint		rows,
+				       guint		columns,
+				       gboolean		homogeneous);
+void	   (*gtk_table_attach)	      (GtkTable	       *table,
+				       GtkWidget       *child,
+				       guint		left_attach,
+				       guint		right_attach,
+				       guint		top_attach,
+				       guint		bottom_attach,
+				       GtkAttachOptions xoptions,
+				       GtkAttachOptions yoptions,
+				       guint		xpadding,
+				       guint		ypadding);
+
 
 	// gtktextbuffer.h
 gboolean (*gtk_text_buffer_backspace)          (GtkTextBuffer *buffer,
@@ -245,7 +257,7 @@ void (*gtk_text_buffer_insert)            (GtkTextBuffer *buffer,
 
 	// gtktextiter.h
 	// FIXME: should I put a #if !GTK_CHECK_VERSION(2,6,0)
-	// around these three, or should I not care??
+	// around these three, or should I not care?
 gboolean (*gtk_text_iter_backward_cursor_position)  (GtkTextIter *iter);
 gboolean (*gtk_text_iter_equal)			    (const GtkTextIter *lhs,
 						     const GtkTextIter *rhs);
@@ -285,8 +297,15 @@ void       (*gtk_toggle_button_set_active)        (GtkToggleButton *toggle_butto
 void              (*gtk_tree_model_get)             (GtkTreeModel *tree_model,
 						  GtkTreeIter  *iter,
 						  ...);
+gboolean          (*gtk_tree_model_get_iter)        (GtkTreeModel *tree_model,
+						  GtkTreeIter  *iter,
+						  GtkTreePath  *path);
+GtkTreePath *     (*gtk_tree_model_get_path)        (GtkTreeModel *tree_model,
+						  GtkTreeIter  *iter);
 GType             (*gtk_tree_model_get_type)        (void) G_GNUC_CONST;
-
+gint        *(*gtk_tree_path_get_indices)      (GtkTreePath       *path);
+GtkTreePath *(*gtk_tree_path_new_from_indices) (gint               first_index,
+					     ...);
     // gtktreeselection.h
 gboolean         (*gtk_tree_selection_get_selected)        (GtkTreeSelection            *selection,
 							 GtkTreeModel               **model,
@@ -352,7 +371,7 @@ void                  (*gtk_widget_set_sensitive)          (GtkWidget    *widget
 void       (*gtk_widget_set_size_request)    (GtkWidget           *widget,
                                            gint                 width,
                                            gint                 height);
-void	   (*gtk_widget_show)		  (GtkWidget	       *widget);
+void	   (*gtk_widget_show_all)		  (GtkWidget	       *widget);
 void	   (*gtk_widget_unref)		  (GtkWidget	       *widget);
 
 	// gtkwindow.h
@@ -434,11 +453,14 @@ void dynamicgtk_uninit(void);
 #define gtk_check_button_new_with_mnemonic dynamicgtksyms.gtk_check_button_new_with_mnemonic
 
 // gtkcombobox.h
+#define gtk_combo_box_get_active dynamicgtksyms.gtk_combo_box_get_active
 #define gtk_combo_box_get_active_iter dynamicgtksyms.gtk_combo_box_get_active_iter
+#define gtk_combo_box_get_active_text dynamicgtksyms.gtk_combo_box_get_active_text
 #define gtk_combo_box_get_model dynamicgtksyms.gtk_combo_box_get_model
 #define gtk_combo_box_get_type dynamicgtksyms.gtk_combo_box_get_type
 #define gtk_combo_box_new_text dynamicgtksyms.gtk_combo_box_new_text
 #define gtk_combo_box_new_with_model dynamicgtksyms.gtk_combo_box_new_with_model
+#define gtk_combo_box_set_active dynamicgtksyms.gtk_combo_box_set_active
 #define gtk_combo_box_set_active_iter dynamicgtksyms.gtk_combo_box_set_active_iter
 
 // gtkcontainer.h
@@ -450,11 +472,6 @@ void dynamicgtk_uninit(void);
 // gtkdialog.h
 #define gtk_dialog_get_type dynamicgtksyms.gtk_dialog_get_type
 #define gtk_dialog_run dynamicgtksyms.gtk_dialog_run
-
-// gtkfixed.h
-#define gtk_fixed_get_type dynamicgtksyms.gtk_fixed_get_type
-#define gtk_fixed_new dynamicgtksyms.gtk_fixed_new
-#define gtk_fixed_put dynamicgtksyms.gtk_fixed_put
 
 // gtkhbox.h
 #define gtk_hbox_new dynamicgtksyms.gtk_hbox_new
@@ -510,6 +527,11 @@ void dynamicgtk_uninit(void);
 #define gtk_scrolled_window_set_policy dynamicgtksyms.gtk_scrolled_window_set_policy
 #define gtk_scrolled_window_set_shadow_type dynamicgtksyms.gtk_scrolled_window_set_shadow_type
 
+// gtktable.h
+#define gtk_table_get_type dynamicgtksyms.gtk_table_get_type
+#define gtk_table_new dynamicgtksyms.gtk_table_new
+#define gtk_table_attach dynamicgtksyms.gtk_table_attach
+
 // gtktextbuffer.h
 #define gtk_text_buffer_backspace dynamicgtksyms.gtk_text_buffer_backspace
 #define gtk_text_buffer_create_mark dynamicgtksyms.gtk_text_buffer_create_mark
@@ -540,7 +562,11 @@ void dynamicgtk_uninit(void);
 
 // gtktreemodel.h
 #define gtk_tree_model_get dynamicgtksyms.gtk_tree_model_get
+#define gtk_tree_model_get_iter dynamicgtksyms.gtk_tree_model_get_iter
+#define gtk_tree_model_get_path dynamicgtksyms.gtk_tree_model_get_path
 #define gtk_tree_model_get_type dynamicgtksyms.gtk_tree_model_get_type
+#define gtk_tree_path_get_indices dynamicgtksyms.gtk_tree_path_get_indices
+#define gtk_tree_path_new_from_indices dynamicgtksyms.gtk_tree_path_new_from_indices
 
 // gtktreeselection.h
 #define gtk_tree_selection_get_selected dynamicgtksyms.gtk_tree_selection_get_selected
@@ -576,7 +602,7 @@ void dynamicgtk_uninit(void);
 #define gtk_widget_ref dynamicgtksyms.gtk_widget_ref
 #define gtk_widget_set_sensitive dynamicgtksyms.gtk_widget_set_sensitive
 #define gtk_widget_set_size_request dynamicgtksyms.gtk_widget_set_size_request
-#define gtk_widget_show dynamicgtksyms.gtk_widget_show
+#define gtk_widget_show_all dynamicgtksyms.gtk_widget_show_all
 #define gtk_widget_unref dynamicgtksyms.gtk_widget_unref
 
 // gtkwindow.h

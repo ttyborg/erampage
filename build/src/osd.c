@@ -8,7 +8,6 @@
 #include "baselayer.h"
 #include "cache1d.h"
 #include "pragmas.h"
-#include "mmulti.h"
 
 symbol_t *symbols = NULL;
 static symbol_t *addnewsymbol(const char *name);
@@ -340,7 +339,7 @@ static void _internal_drawosdstr(int32_t x, int32_t y, char *ch, int32_t len, in
     UNREFERENCED_PARAMETER(pal);
 
     if (len>1023) len=1023;
-    memcpy(st,ch,len);
+    Bmemcpy(st,ch,len);
     st[len]=0;
 
     if (white<0)
@@ -751,7 +750,7 @@ static void OSD_HistoryPrev(void)
     if (osdhistorypos >= osdhistorysize-1) return;
 
     osdhistorypos++;
-    memcpy(osdeditbuf, osdhistorybuf[osdhistorypos], EDITLENGTH+1);
+    Bmemcpy(osdeditbuf, osdhistorybuf[osdhistorypos], EDITLENGTH+1);
     osdeditlen = osdeditcursor = 0;
     while (osdeditbuf[osdeditcursor]) osdeditlen++, osdeditcursor++;
     if (osdeditcursor<osdeditwinstart)
@@ -783,7 +782,7 @@ static void OSD_HistoryNext(void)
     }
 
     osdhistorypos--;
-    memcpy(osdeditbuf, osdhistorybuf[osdhistorypos], EDITLENGTH+1);
+    Bmemcpy(osdeditbuf, osdhistorybuf[osdhistorypos], EDITLENGTH+1);
     osdeditlen = osdeditcursor = 0;
     while (osdeditbuf[osdeditcursor]) osdeditlen++, osdeditcursor++;
     if (osdeditcursor<osdeditwinstart)
@@ -1244,12 +1243,12 @@ void OSD_ResizeDisplay(int32_t w, int32_t h)
     memset(newtext, 32, TEXTSIZE);
     for (i=j-1; i>=0; i--)
     {
-        memcpy(newtext+newcols*i, osdtext+osdcols*i, k);
-        memcpy(newfmt+newcols*i, osdfmt+osdcols*i, k);
+        Bmemcpy(newtext+newcols*i, osdtext+osdcols*i, k);
+        Bmemcpy(newfmt+newcols*i, osdfmt+osdcols*i, k);
     }
 
-    memcpy(osdtext, newtext, TEXTSIZE);
-    memcpy(osdfmt, newfmt, TEXTSIZE);
+    Bmemcpy(osdtext, newtext, TEXTSIZE);
+    Bmemcpy(osdfmt, newfmt, TEXTSIZE);
     osdcols = newcols;
     osdmaxlines = newmaxlines;
     osdmaxrows = getrowheight(h)-2;
@@ -1295,7 +1294,7 @@ void OSD_ShowDisplay(int32_t onf)
 
 void OSD_Draw(void)
 {
-    unsigned topoffs;
+    uint32_t topoffs;
     int32_t row, lines, x, len;
 
     if (!osdinited) return;
@@ -1628,7 +1627,7 @@ int32_t OSD_Dispatch(const char *cmd)
 
         if (wp[0] == '/' && wp[1] == '/') // cheap hack
         {
-            free(workbuf);
+            Bfree(workbuf);
             return -1;
         }
 
@@ -1636,7 +1635,7 @@ int32_t OSD_Dispatch(const char *cmd)
         if (!symb)
         {
             OSD_Printf(OSDTEXT_RED "Error: \"%s\" is not a valid command or cvar\n", wp);
-            free(workbuf);
+            Bfree(workbuf);
             return -1;
         }
 
@@ -1667,7 +1666,7 @@ int32_t OSD_Dispatch(const char *cmd)
     }
     while (wtp && restart);
 
-    free(workbuf);
+    Bfree(workbuf);
 
     return 0;
 }
@@ -1876,85 +1875,85 @@ int32_t osdcmd_cvar_set(const osdfuncparm_t *parm)
         switch (cvars[i].type&(CVAR_FLOAT|CVAR_DOUBLE|CVAR_INT|CVAR_UINT|CVAR_BOOL|CVAR_STRING))
         {
         case CVAR_FLOAT:
+        {
+            float val;
+            if (showval)
             {
-                float val;
-                if (showval)
-                {
-                    OSD_Printf("\"%s\" is \"%f\"\n%s\n",cvars[i].name,*(float*)cvars[i].var,(char*)cvars[i].helpstr);
-                    return OSDCMD_OK;
-                }
-
-                sscanf(parm->parms[0], "%f", &val);
-
-                if (val < cvars[i].min || val > cvars[i].max)
-                {
-                    OSD_Printf("%s value out of range\n",cvars[i].name);
-                    return OSDCMD_OK;
-                }
-                *(float*)cvars[i].var = val;
-                if (!OSD_ParsingScript())
-                    OSD_Printf("%s %f",cvars[i].name,val);
+                OSD_Printf("\"%s\" is \"%f\"\n%s\n",cvars[i].name,*(float*)cvars[i].var,(char*)cvars[i].helpstr);
+                return OSDCMD_OK;
             }
-            break;
+
+            sscanf(parm->parms[0], "%f", &val);
+
+            if (val < cvars[i].min || val > cvars[i].max)
+            {
+                OSD_Printf("%s value out of range\n",cvars[i].name);
+                return OSDCMD_OK;
+            }
+            *(float*)cvars[i].var = val;
+            if (!OSD_ParsingScript())
+                OSD_Printf("%s %f",cvars[i].name,val);
+        }
+        break;
         case CVAR_DOUBLE:
+        {
+            double val;
+            if (showval)
             {
-                double val;
-                if (showval)
-                {
-                    OSD_Printf("\"%s\" is \"%f\"\n%s\n",cvars[i].name,*(double*)cvars[i].var,(char*)cvars[i].helpstr);
-                    return OSDCMD_OK;
-                }
-
-                sscanf(parm->parms[0], "%lf", &val);
-
-                if (val < cvars[i].min || val > cvars[i].max)
-                {
-                    OSD_Printf("%s value out of range\n",cvars[i].name);
-                    return OSDCMD_OK;
-                }
-                *(double*)cvars[i].var = val;
-                if (!OSD_ParsingScript())
-                    OSD_Printf("%s %f",cvars[i].name,val);
+                OSD_Printf("\"%s\" is \"%f\"\n%s\n",cvars[i].name,*(double*)cvars[i].var,(char*)cvars[i].helpstr);
+                return OSDCMD_OK;
             }
-            break;
+
+            sscanf(parm->parms[0], "%lf", &val);
+
+            if (val < cvars[i].min || val > cvars[i].max)
+            {
+                OSD_Printf("%s value out of range\n",cvars[i].name);
+                return OSDCMD_OK;
+            }
+            *(double*)cvars[i].var = val;
+            if (!OSD_ParsingScript())
+                OSD_Printf("%s %f",cvars[i].name,val);
+        }
+        break;
         case CVAR_INT:
         case CVAR_UINT:
         case CVAR_BOOL:
+        {
+            int32_t val;
+            if (showval)
             {
-                int32_t val;
-                if (showval)
-                {
-                    OSD_Printf("\"%s\" is \"%d\"\n%s\n",cvars[i].name,*(int32_t*)cvars[i].var,(char*)cvars[i].helpstr);
-                    return OSDCMD_OK;
-                }
-
-                val = atoi(parm->parms[0]);
-                if (cvars[i].type & CVAR_BOOL) val = val != 0;
-
-                if (val < cvars[i].min || val > cvars[i].max)
-                {
-                    OSD_Printf("%s value out of range\n",cvars[i].name);
-                    return OSDCMD_OK;
-                }
-                *(int32_t*)cvars[i].var = val;
-                if (!OSD_ParsingScript())
-                    OSD_Printf("%s %d",cvars[i].name,val);
+                OSD_Printf("\"%s\" is \"%d\"\n%s\n",cvars[i].name,*(int32_t*)cvars[i].var,(char*)cvars[i].helpstr);
+                return OSDCMD_OK;
             }
-            break;
+
+            val = atoi(parm->parms[0]);
+            if (cvars[i].type & CVAR_BOOL) val = val != 0;
+
+            if (val < cvars[i].min || val > cvars[i].max)
+            {
+                OSD_Printf("%s value out of range\n",cvars[i].name);
+                return OSDCMD_OK;
+            }
+            *(int32_t*)cvars[i].var = val;
+            if (!OSD_ParsingScript())
+                OSD_Printf("%s %d",cvars[i].name,val);
+        }
+        break;
         case CVAR_STRING:
+        {
+            if (showval)
             {
-                if (showval)
-                {
-                    OSD_Printf("\"%s\" is \"%s\"\n%s\n",cvars[i].name,(char*)cvars[i].var,(char*)cvars[i].helpstr);
-                    return OSDCMD_OK;
-                }
-
-                Bstrncpy((char*)cvars[i].var, parm->parms[0], cvars[i].extra-1);
-                ((char*)cvars[i].var)[cvars[i].extra-1] = 0;
-                if (!OSD_ParsingScript())
-                    OSD_Printf("%s %s",cvars[i].name,(char*)cvars[i].var);
+                OSD_Printf("\"%s\" is \"%s\"\n%s\n",cvars[i].name,(char*)cvars[i].var,(char*)cvars[i].helpstr);
+                return OSDCMD_OK;
             }
-            break;
+
+            Bstrncpy((char*)cvars[i].var, parm->parms[0], cvars[i].extra-1);
+            ((char*)cvars[i].var)[cvars[i].extra-1] = 0;
+            if (!OSD_ParsingScript())
+                OSD_Printf("%s %s",cvars[i].name,(char*)cvars[i].var);
+        }
+        break;
         default:
             break;
         }

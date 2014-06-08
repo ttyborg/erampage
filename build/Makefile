@@ -17,7 +17,6 @@ PRETTY_OUTPUT = 1
 #  USE_OPENGL     - enables OpenGL support in Polymost
 #  NOASM          - disables the use of inline assembly pragmas
 #  LINKED_GTK     - enables compile-time linkage to GTK
-#  RANCID_NETWORKING - enable network backend from rancidmeat port
 #
 
 SUPERBUILD ?= 1
@@ -27,7 +26,6 @@ USE_OPENGL ?= 1
 NOASM ?= 0
 LINKED_GTK ?= 0
 BUILD32_ON_64 ?= 0
-RANCID_NETWORKING ?= 0
 
 ifeq (0,$(USE_OPENGL))
 	POLYMER = 0
@@ -40,8 +38,13 @@ endif
 #
 RELEASE?=1
 DEBUGANYWAY?=0
+KRANDDEBUG?=0
 EFENCE?=0
 OPTLEVEL	?= 2
+
+ifneq (0,$(KRANDDEBUG))
+    RELEASE=0
+endif
 
 # SDK locations for Windows - adjust to match your setup
 #
@@ -71,6 +74,9 @@ ifneq ($(RELEASE),0)
 else
   # Debugging enabled
   debug=-ggdb -O0 -DDEBUGGINGAIDS -DNOSDLPARACHUTE
+  ifneq (0,$(KRANDDEBUG))
+    debug+=-DKRANDDEBUG=1
+  endif
 endif
 
 ifneq (0,$(DEBUGANYWAY))
@@ -99,12 +105,13 @@ ifeq (4,$(GCC_MAJOR))
   endif
 endif
 
-OURCFLAGS=$(debug) -W -Wall -Wimplicit -Wno-char-subscripts \
-	-funsigned-char -fno-strict-aliasing -DNO_GCC_BUILTINS \
+OURCFLAGS=$(debug) -W -Wall -Wimplicit -Werror-implicit-function-declaration \
+	-Wno-char-subscripts -funsigned-char -fno-strict-aliasing -DNO_GCC_BUILTINS \
 	-DKSFORBUILD -I$(INC) -D_FORTIFY_SOURCE=2 \
+	-fjump-tables -fno-stack-protector
 #    -march=pentium3 -mtune=generic -mmmx -m3dnow -msse -mfpmath=sse
 OURCXXFLAGS=-fno-exceptions -fno-rtti
-LIBS=
+LIBS=-pthread
 ASFLAGS=-s #-g
 EXESUFFIX=
 
@@ -128,12 +135,12 @@ ENGINEOBJS+= \
 	$(OBJ)/textfont.$o \
 	$(OBJ)/smalltextfont.$o \
 	$(OBJ)/kplib.$o \
-	$(OBJ)/lzf_c.$o \
-	$(OBJ)/lzf_d.$o \
+	$(OBJ)/quicklz.$o \
 	$(OBJ)/md4.$o \
 	$(OBJ)/osd.$o \
 	$(OBJ)/pragmas.$o \
-	$(OBJ)/scriptfile.$o
+	$(OBJ)/scriptfile.$o \
+    $(OBJ)/nedmalloc.$o
 
 ifeq (1,$(USE_OPENGL))
 	ENGINEOBJS+=  $(OBJ)/mdsprite.$o
@@ -142,12 +149,6 @@ endif
 
 ifeq (1,$(POLYMER))
 	ENGINEOBJS+=  $(OBJ)/polymer.$o
-endif
-
-ifneq (0,$(RANCID_NETWORKING))
-	ENGINEOBJS+= $(OBJ)/mmulti_unstable.$o
-else
-	ENGINEOBJS+= $(OBJ)/mmulti.$o
 endif
 
 EDITOROBJS=$(OBJ)/build.$o \
@@ -235,24 +236,24 @@ $(OBJ)/$(EDITORLIB): $(EDITOROBJS)
 pragmacheck$(EXESUFFIX): $(OBJ)/pragmacheck.$o $(OBJ)/pragmas.$o
 	$(CC) $(subst -Dmain=app_main,,$(OURCFLAGS)) -o $@ $^
 	
-kextract$(EXESUFFIX): $(OBJ)/kextract.$o $(OBJ)/compat.$o
-	$(CC) -o $@ $^
-kgroup$(EXESUFFIX): $(OBJ)/kgroup.$o $(OBJ)/compat.$o
-	$(CC) -o $@ $^
-transpal$(EXESUFFIX): $(OBJ)/transpal.$o $(OBJ)/pragmas.$o $(OBJ)/compat.$o
-	$(CC) -o $@ $^
-wad2art$(EXESUFFIX): $(OBJ)/wad2art.$o $(OBJ)/pragmas.$o $(OBJ)/compat.$o
-	$(CC) -o $@ $^
-wad2map$(EXESUFFIX): $(OBJ)/wad2map.$o $(OBJ)/pragmas.$o $(OBJ)/compat.$o
-	$(CC) -o $@ $^
+kextract$(EXESUFFIX): $(OBJ)/kextract.$o $(OBJ)/compat.$o $(OBJ)/nedmalloc.$o
+	$(CC) -o $@ $^ $(LIBS)
+kgroup$(EXESUFFIX): $(OBJ)/kgroup.$o $(OBJ)/compat.$o $(OBJ)/nedmalloc.$o
+	$(CC) -o $@ $^ $(LIBS)
+transpal$(EXESUFFIX): $(OBJ)/transpal.$o $(OBJ)/pragmas.$o $(OBJ)/compat.$o $(OBJ)/nedmalloc.$o
+	$(CC) -o $@ $^ $(LIBS)
+wad2art$(EXESUFFIX): $(OBJ)/wad2art.$o $(OBJ)/pragmas.$o $(OBJ)/compat.$o $(OBJ)/nedmalloc.$o
+	$(CC) -o $@ $^ $(LIBS)
+wad2map$(EXESUFFIX): $(OBJ)/wad2map.$o $(OBJ)/pragmas.$o $(OBJ)/compat.$o $(OBJ)/nedmalloc.$o
+	$(CC) -o $@ $^ $(LIBS)
 generateicon$(EXESUFFIX): $(OBJ)/generateicon.$o $(OBJ)/kplib.$o
-	$(CC) -o $@ $^
-cacheinfo$(EXESUFFIX): $(OBJ)/cacheinfo.$o $(OBJ)/compat.$o
-	$(CC) -o $@ $^
+	$(CC) -o $@ $^ $(LIBS)
+cacheinfo$(EXESUFFIX): $(OBJ)/cacheinfo.$o $(OBJ)/compat.$o $(OBJ)/nedmalloc.$o
+	$(CC) -o $@ $^ $(LIBS)
 enumdisplay$(EXESUFFIX): src/misc/enumdisplay.c
-	$(CC) -g -Os -o $@ $^ -I$(DXROOT)/include -lgdi32
+	$(CC) -g -Os -o $@ $^ $(LIBS) -I$(DXROOT)/include -lgdi32
 mapdump$(EXESUFFIX): $(OBJ)/mapdump.$o
-	$(CC) -o $@ $^
+	$(CC) -o $@ $^ $(LIBS)
 
 # DEPENDENCIES
 include Makefile.deps

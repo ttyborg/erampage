@@ -94,24 +94,16 @@ extern "C" {
 
 // Number of JOY axes
 
-#define MAXJOYAXES 6
-
-// Number of GamePad axes
-
-#define MAXGAMEPADAXES 2
-
-// Number of axes
-
-#define MAXAXES 6
+#define MAXJOYAXES 8
 
 // NORMAL axis scale
 
 #define NORMALAXISSCALE (65536)
 
-#define BUTTONSET(x,value) (CONTROL_ButtonState |= ((uint64)value<<((uint64)(x))))
-#define BUTTONCLEAR(x) (CONTROL_ButtonState &= ~((uint64)1<<((uint64)(x))))
+#define BUTTONSET(x,value) (CONTROL_ButtonState |= ((uint64_t)value<<((uint64_t)(x))))
+#define BUTTONCLEAR(x) (CONTROL_ButtonState &= ~((uint64_t)1<<((uint64_t)(x))))
 
-#define BUTTONHELDSET(x,value) (CONTROL_ButtonHeldState |= (uint64)(value<<((uint64)(x))))
+#define BUTTONHELDSET(x,value) (CONTROL_ButtonHeldState |= (uint64_t)(value<<((uint64_t)(x))))
 
 #define LIMITCONTROL(x)\
     {\

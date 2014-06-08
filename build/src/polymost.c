@@ -82,6 +82,7 @@ Low priority:
 #include "engine_priv.h"
 #include "hightile.h"
 #include "polymost.h"
+#include "polymer.h"
 #include "scriptfile.h"
 #include "cache1d.h"
 #include "kplib.h"
@@ -104,7 +105,7 @@ static double dxb1[MAXWALLSB], dxb2[MAXWALLSB];
 #define LINTERPSIZ 4 //log2 of interpolation size. 4:pretty fast&acceptable quality, 0:best quality/slow!
 #define DEPTHDEBUG 0 //1:render distance instead of texture, for debugging only!, 0:default
 
-float shadescale = 1.050;
+float shadescale = 1.050f;
 
 double gyxscale, gxyaspect, gviewxrange, ghalfx, grhalfxdown10, grhalfxdown10x, ghoriz;
 double gcosang, gsinang, gcosang2, gsinang2;
@@ -138,8 +139,7 @@ struct glfiltermodes glfiltermodes[numglfiltermodes] =
 int32_t glanisotropy = 1;            // 0 = maximum supported by card
 int32_t glusetexcompr = 1;
 int32_t gltexfiltermode = 2; // GL_NEAREST_MIPMAP_NEAREST
-int32_t glusetexcache = 0;
-int32_t glusetexcachecompression = 1;
+int32_t glusetexcache = 2;
 int32_t glmultisample = 0, glnvmultisamplehint = 0;
 int32_t gltexmaxsize = 0;      // 0 means autodetection on first run
 int32_t gltexmiplevel = 0;		// discards this many mipmap levels
@@ -195,71 +195,6 @@ static char ptempbuf[MAXWALLSB<<1];
 int32_t r_parallaxskyclamping = 1;
 int32_t r_parallaxskypanning = 0;
 
-#if defined(USE_MSC_PRAGMAS)
-static inline void ftol(float f, int32_t *a)
-{
-    _asm
-    {
-        mov eax, a
-        fld f
-        fistp dword ptr [eax]
-    }
-}
-
-static inline void dtol(double d, int32_t *a)
-{
-    _asm
-    {
-        mov eax, a
-        fld d
-        fistp dword ptr [eax]
-    }
-}
-#elif defined(USE_WATCOM_PRAGMAS)
-
-#pragma aux ftol =\
-	"fistp dword ptr [eax]",\
-	parm [eax 8087]
-#pragma aux dtol =\
-	"fistp dword ptr [eax]",\
-	parm [eax 8087]
-
-#elif defined(USE_GCC_PRAGMAS)
-
-static inline void ftol(float f, int32_t *a)
-{
-    __asm__ __volatile__(
-#if 0 //(__GNUC__ >= 3)
-        "flds %1; fistpl %0;"
-#else
-"flds %1; fistpl (%0);"
-#endif
-    : "=r"(a) : "m"(f) : "memory","cc");
-}
-
-static inline void dtol(double d, int32_t *a)
-{
-    __asm__ __volatile__(
-#if 0 //(__GNUC__ >= 3)
-        "fldl %1; fistpl %0;"
-#else
-"fldl %1; fistpl (%0);"
-#endif
-    : "=r"(a) : "m"(d) : "memory","cc");
-}
-
-#else
-static inline void ftol(float f, int32_t *a)
-{
-    *a = (int32_t)f;
-}
-
-static inline void dtol(double d, int32_t *a)
-{
-    *a = (int32_t)d;
-}
-#endif
-
 static inline int32_t imod(int32_t a, int32_t b)
 {
     if (a >= 0) return(a%b);
@@ -313,7 +248,7 @@ void drawline2d(float x0, float y0, float x1, float y1, char col)
 #define USEKENFILTER 1
 
 #ifdef USELZF
-#	include "lzf.h"
+#	include "quicklz.h"
 #else
 #	include "lzwnew.h"
 #endif
@@ -362,8 +297,6 @@ pthtyp *gltexcachead[GLTEXCACHEADSIZ];
 
 int32_t drawingskybox = 0;
 
-pthtyp *pichead;
-
 int32_t gloadtile_art(int32_t,int32_t,int32_t,pthtyp*,int32_t);
 int32_t gloadtile_hi(int32_t,int32_t,int32_t,hicreplctyp*,int32_t,pthtyp*,int32_t,char);
 static int32_t hicprecaching = 0;
@@ -375,11 +308,11 @@ pthtyp * gltexcache(int32_t dapicnum, int32_t dapalnum, int32_t dameth)
 
     j = (dapicnum&(GLTEXCACHEADSIZ-1));
 
-    if (usehightile) si = hicfindsubst(dapicnum,dapalnum,drawingskybox);
-    else si = NULL;
+    si = usehightile ? hicfindsubst(dapicnum,dapalnum,drawingskybox) : NULL;
+
     if (!si)
     {
-        if (drawingskybox) return NULL;
+        if (drawingskybox || dapalnum >= (MAXPALOOKUPS - RESERVEDPALS)) return NULL;
         goto tryart;
     }
 
@@ -389,9 +322,8 @@ pthtyp * gltexcache(int32_t dapicnum, int32_t dapalnum, int32_t dameth)
      *    effects are applied to the palette 0 texture if it exists
      */
 
-    pichead=gltexcachead[j]; // for palmaps
     // load a replacement
-    for (pth=pichead; pth; pth=pth->next)
+    for (pth=gltexcachead[j]; pth; pth=pth->next)
     {
         if (pth->picnum == dapicnum &&
                 pth->palnum == si->palnum &&
@@ -415,7 +347,7 @@ pthtyp * gltexcache(int32_t dapicnum, int32_t dapalnum, int32_t dameth)
     }
 
 
-    pth = (pthtyp *)calloc(1,sizeof(pthtyp));
+    pth = (pthtyp *)Bcalloc(1,sizeof(pthtyp));
     if (!pth) return NULL;
 
     // possibly fetch an already loaded multitexture :_)
@@ -425,7 +357,7 @@ pthtyp * gltexcache(int32_t dapicnum, int32_t dapalnum, int32_t dameth)
             {
                 if ((pth2->hicr) && (pth2->hicr->filename) && (Bstrcasecmp(pth2->hicr->filename, si->filename) == 0))
                 {
-                    memcpy(pth, pth2, sizeof(pthtyp));
+                    Bmemcpy(pth, pth2, sizeof(pthtyp));
                     pth->picnum = dapicnum;
                     pth->flags = ((dameth&4)>>2) + 2 + ((drawingskybox>0)<<2);
                     if (pth2->flags & 8) pth->flags |= 8; //hasalpha
@@ -439,7 +371,7 @@ pthtyp * gltexcache(int32_t dapicnum, int32_t dapalnum, int32_t dameth)
 
     if (gloadtile_hi(dapicnum,dapalnum,drawingskybox,si,dameth,pth,1, (si->palnum>0) ? 0 : hictinting[dapalnum].f))
     {
-        free(pth);
+        Bfree(pth);
         if (drawingskybox) return NULL;
         goto tryart;   // failed, so try for ART
     }
@@ -466,12 +398,12 @@ tryart:
             return(pth);
         }
 
-    pth = (pthtyp *)calloc(1,sizeof(pthtyp));
+    pth = (pthtyp *)Bcalloc(1,sizeof(pthtyp));
     if (!pth) return NULL;
 
     if (gloadtile_art(dapicnum,dapalnum,dameth,pth,1))
     {
-        free(pth);
+        Bfree(pth);
         return NULL;
     }
     pth->next = gltexcachead[j];
@@ -651,10 +583,10 @@ void polymost_glreset()
                 if (pth->flags & 16) // fullbright textures
                 {
                     bglDeleteTextures(1,&pth->ofb->glpic);
-                    free(pth->ofb);
+                    Bfree(pth->ofb);
                 }
                 bglDeleteTextures(1,&pth->glpic);
-                free(pth);
+                Bfree(pth);
                 pth = next;
             }
             gltexcachead[i] = NULL;
@@ -713,7 +645,7 @@ void polymost_glinit()
         bglHint(GL_FOG_HINT,GL_DONT_CARE);
     }
 
-    bglFogi(GL_FOG_MODE,GL_EXP2);
+    bglFogi(GL_FOG_MODE, GL_EXP2);
     bglFogf(GL_FOG_DENSITY,1.0); //must be > 0, default is 1
     /*    bglFogf(GL_FOG_START,0.0); //default is 0
         bglFogf(GL_FOG_END,1.0); //default is 1 */
@@ -807,7 +739,7 @@ void polymost_glinit()
     }
     else rewind(cacheindexptr);
 
-    cachefilehandle = Bopen(TEXCACHEFILE,BO_BINARY|BO_CREAT|BO_APPEND|BO_RDWR,BS_IREAD|BS_IWRITE);
+    cachefilehandle = Bopen(TEXCACHEFILE, BO_BINARY|BO_CREAT|BO_APPEND|BO_RDWR, BS_IREAD|BS_IWRITE);
 
     if (cachefilehandle < 0)
     {
@@ -825,8 +757,9 @@ void polymost_glinit()
         curcacheindex = curcacheindex->next;
     }
 
-    curcacheindex = firstcacheindex;
-    initprintf("Cache contains %d bytes of garbage data\n",Blseek(cachefilehandle, 0, BSEEK_END)-i);
+    i = Blseek(cachefilehandle, 0, BSEEK_END)-i;
+    if (i)
+        initprintf("Cache contains %d bytes of garbage data\n",i);
 //    Blseek(cachefilehandle, 0, BSEEK_SET);
 }
 
@@ -954,10 +887,10 @@ void resizeglcheck()
                 ratio += 4.f*(-gshang-0.7f);
         }
 
-        glox1 = windowx1; gloy1 = windowy1;
-        glox2 = windowx2; gloy2 = windowy2;
+        glox1 = (float)windowx1; gloy1 = (float)windowy1;
+        glox2 = (float)windowx2; gloy2 = (float)windowy2;
 
-        fovcorrect = glprojectionhacks?(glwidescreen?0:(((windowx2-windowx1+1) * ratio) - (windowx2-windowx1+1))):0;
+        fovcorrect = (int32_t)(glprojectionhacks?(glwidescreen?0:(((windowx2-windowx1+1) * ratio) - (windowx2-windowx1+1))):0);
 
         bglViewport(windowx1 - (fovcorrect / 2), yres-(windowy2+1),windowx2-windowx1+1 + fovcorrect, windowy2-windowy1+1);
 
@@ -1146,7 +1079,7 @@ int32_t gloadtile_art(int32_t dapic, int32_t dapal, int32_t dameth, pthtyp *pth,
         }
     }
 
-    pic = (coltype *)malloc(xsiz*ysiz*sizeof(coltype));
+    pic = (coltype *)Bmalloc(xsiz*ysiz*sizeof(coltype));
     if (!pic) return 1;
 
     if (!waloff[dapic])
@@ -1238,20 +1171,21 @@ int32_t gloadtile_art(int32_t dapic, int32_t dapal, int32_t dameth, pthtyp *pth,
         bglTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,glinfo.clamptoedge?GL_CLAMP_TO_EDGE:GL_CLAMP);
     }
 
-    if (pic) free(pic);
+    if (pic) Bfree(pic);
 
     pth->picnum = dapic;
     pth->palnum = dapal;
     pth->effects = 0;
-    pth->flags = ((dameth&4)>>2) | (hasalpha<<3) | (hasfullbright<<4);
+    pth->flags = ((dameth&4)>>2) | (hasalpha<<3);
     pth->hicr = NULL;
 
     if ((hasfullbright) && (!fullbrightloadingpass))
     {
         // load the ONLY texture that'll be assembled with the regular one to make the final texture with fullbright pixels
         fullbrightloadingpass = 1;
-        pth->ofb = (pthtyp *)calloc(1,sizeof(pthtyp));
+        pth->ofb = (pthtyp *)Bcalloc(1,sizeof(pthtyp));
         if (!pth->ofb) return 1;
+        pth->flags |= (hasfullbright<<4);
         if (gloadtile_art(dapic, dapal, dameth, pth->ofb, 1)) return 1;
 
         fullbrightloadingpass = 0;
@@ -1361,14 +1295,14 @@ int32_t trytexcache(char *fn, int32_t len, int32_t dameth, char effect, texcache
 //    initprintf("Loading cached tex: %s\n", cachefn);
 
     if (Bread(cachefilehandle, head, sizeof(texcacheheader)) < (int32_t)sizeof(texcacheheader)) goto failure;
-    if (Bmemcmp(head->magic, "PMST", 4)) goto failure;
+    if (Bmemcmp(head->magic, TEXCACHEMAGIC, 4)) goto failure;
     head->xdim = B_LITTLE32(head->xdim);
     head->ydim = B_LITTLE32(head->ydim);
     head->flags = B_LITTLE32(head->flags);
     head->quality = B_LITTLE32(head->quality);
 
-    if ((head->flags & 4) && !glusetexcachecompression) goto failure;
-    if (!(head->flags & 4) && glusetexcachecompression) goto failure;
+    if ((head->flags & 4) && glusetexcache != 2) goto failure;
+    if (!(head->flags & 4) && glusetexcache == 2) goto failure;
 
     if (!(head->flags & 8) && head->quality != r_downsize) return -1; // handle nocompress
     if (gltexmaxsize && (head->xdim > (1<<gltexmaxsize) || head->ydim > (1<<gltexmaxsize))) goto failure;
@@ -1426,9 +1360,9 @@ void writexcache(char *fn, int32_t len, int32_t dameth, char effect, texcachehea
     offset = Blseek(cachefilehandle, 0, BSEEK_CUR);
     OSD_Printf("Caching %s, offset 0x%x\n", cachefn, offset);
 
-    Bmemcpy(head->magic, "PMST", 4);   // sizes are set by caller
+    Bmemcpy(head->magic, TEXCACHEMAGIC, 4);   // sizes are set by caller
 
-    if (glusetexcachecompression) head->flags |= 4;
+    if (glusetexcache == 2) head->flags |= 4;
 
     head->xdim = B_LITTLE32(head->xdim);
     head->ydim = B_LITTLE32(head->ydim);
@@ -1445,6 +1379,9 @@ void writexcache(char *fn, int32_t len, int32_t dameth, char effect, texcachehea
         if (gi != GL_TRUE) goto failure;   // an uncompressed mipmap
         bglGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_INTERNAL_FORMAT, (GLint *)&gi);
         if (bglGetError() != GL_NO_ERROR) goto failure;
+#ifdef __APPLE__
+		if(pr_ati_textureformat_one && gi == 1 ) gi = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+#endif
         pict.format = B_LITTLE32(gi);
         bglGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_WIDTH, (GLint *)&gi);
         if (bglGetError() != GL_NO_ERROR) goto failure;
@@ -1464,14 +1401,14 @@ void writexcache(char *fn, int32_t len, int32_t dameth, char effect, texcachehea
 
         if (alloclen < miplen)
         {
-            void *picc = realloc(pic, miplen);
+            void *picc = Brealloc(pic, miplen);
             if (!picc) goto failure; else pic = picc;
             alloclen = miplen;
 
-            picc = realloc(packbuf, alloclen+16);
+            picc = Brealloc(packbuf, alloclen+16);
             if (!picc) goto failure; else packbuf = picc;
 
-            picc = realloc(midbuf, miplen);
+            picc = Brealloc(midbuf, miplen);
             if (!picc) goto failure; else midbuf = picc;
         }
 
@@ -1527,9 +1464,9 @@ failure:
     Bmemset(curcacheindex->name,0,sizeof(curcacheindex->name));
 
 success:
-    if (midbuf) free(midbuf);
-    if (pic) free(pic);
-    if (packbuf) free(packbuf);
+    if (midbuf) Bfree(midbuf);
+    if (pic) Bfree(pic);
+    if (packbuf) Bfree(packbuf);
 }
 
 int32_t gloadtile_cached(int32_t fil, texcacheheader *head, int32_t *doalloc, pthtyp *pth,int32_t dapalnum)
@@ -1569,14 +1506,14 @@ int32_t gloadtile_cached(int32_t fil, texcacheheader *head, int32_t *doalloc, pt
 
         if (alloclen < pict.size)
         {
-            void *picc = realloc(pic, pict.size);
+            void *picc = Brealloc(pic, pict.size);
             if (!picc) goto failure; else pic = picc;
             alloclen = pict.size;
 
-            picc = realloc(packbuf, alloclen+16);
+            picc = Brealloc(packbuf, alloclen+16);
             if (!picc) goto failure; else packbuf = picc;
 
-            picc = realloc(midbuf, pict.size);
+            picc = Brealloc(midbuf, pict.size);
             if (!picc) goto failure; else midbuf = picc;
         }
 
@@ -1590,7 +1527,7 @@ int32_t gloadtile_cached(int32_t fil, texcacheheader *head, int32_t *doalloc, pt
             GLint format;
             bglGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_INTERNAL_FORMAT, &format);
             if (bglGetError() != GL_NO_ERROR) goto failure;
-            format = B_LITTLE32(format);
+//            format = B_LITTLE32(format);
             if (pict.format != format)
             {
                 OSD_Printf("invalid texture cache file format %d %d\n",pict.format, format);
@@ -1600,15 +1537,15 @@ int32_t gloadtile_cached(int32_t fil, texcacheheader *head, int32_t *doalloc, pt
 
     }
 
-    if (midbuf) free(midbuf);
-    if (pic) free(pic);
-    if (packbuf) free(packbuf);
+    if (midbuf) Bfree(midbuf);
+    if (pic) Bfree(pic);
+    if (packbuf) Bfree(packbuf);
     return 0;
 failure:
     initprintf("failure!!!\n");
-    if (midbuf) free(midbuf);
-    if (pic) free(pic);
-    if (packbuf) free(packbuf);
+    if (midbuf) Bfree(midbuf);
+    if (pic) Bfree(pic);
+    if (packbuf) Bfree(packbuf);
     return -1;
 }
 // --------------------------------------------------- JONOF'S COMPRESSED TEXTURE CACHE STUFF
@@ -1623,6 +1560,10 @@ int32_t gloadtile_hi(int32_t dapic,int32_t dapalnum, int32_t facen, hicreplctyp 
 
     int32_t cachefil = -1;
     texcacheheader cachead;
+
+    static coltype *lastpic = NULL;
+    static char *lastfn = NULL;
+    static int32_t lastsize = 0;
 
     if (!hicr) return -1;
     if (facen > 0)
@@ -1664,7 +1605,7 @@ int32_t gloadtile_hi(int32_t dapic,int32_t dapalnum, int32_t facen, hicreplctyp 
 
         if ((filh = kopen4load(fn, 0)) < 0) return -1;
 
-        picfil = (char *)malloc(picfillen+1); if (!picfil) { kclose(filh); return 1; }
+        picfil = (char *)Bmalloc(picfillen+1); if (!picfil) { kclose(filh); return 1; }
         kread(filh, picfil, picfillen);
         kclose(filh);
 
@@ -1672,7 +1613,7 @@ int32_t gloadtile_hi(int32_t dapic,int32_t dapalnum, int32_t facen, hicreplctyp 
         // xsiz/y = 2^x size of replacement
 
         kpgetdim(picfil,picfillen,&tsizx,&tsizy);
-        if (tsizx == 0 || tsizy == 0) { free(picfil); return -1; }
+        if (tsizx == 0 || tsizy == 0) { Bfree(picfil); return -1; }
         pth->sizx = tsizx;
         pth->sizy = tsizy;
 
@@ -1686,9 +1627,41 @@ int32_t gloadtile_hi(int32_t dapic,int32_t dapalnum, int32_t facen, hicreplctyp 
             xsiz = tsizx;
             ysiz = tsizy;
         }
-        pic = (coltype *)calloc(xsiz,ysiz*sizeof(coltype)); if (!pic) { free(picfil); return 1; }
+        pic = (coltype *)Bcalloc(xsiz,ysiz*sizeof(coltype)); if (!pic) { Bfree(picfil); return 1; }
 
-        if (kprender(picfil,picfillen,(intptr_t)pic,xsiz*sizeof(coltype),xsiz,ysiz,0,0)) { free(picfil); free(pic); return -2; }
+        if (lastpic && lastfn && !Bstrcmp(lastfn,fn))
+        {
+//            if (hicprecaching) OSD_Printf("use  %4d: p%-3d m%d e%d\n", dapic, dapalnum, dameth, effect);
+            Bmemcpy(pic, lastpic, xsiz*ysiz*sizeof(coltype));
+        }
+        else
+        {
+//            if (hicprecaching) OSD_Printf("rend %4d: p%-3d m%d e%d: `%s'\n", dapic, dapalnum, dameth, effect, fn);
+            if (kprender(picfil,picfillen,(intptr_t)pic,xsiz*sizeof(coltype),xsiz,ysiz,0,0)) { Bfree(picfil); Bfree(pic); return -2; }
+
+            if (hicprecaching)
+            {
+                lastfn = fn;  // careful...
+                if (!lastpic)
+                {
+                    lastpic = Bmalloc(xsiz*ysiz*sizeof(coltype));
+                    lastsize = xsiz*ysiz;
+                }
+                else if (lastsize < xsiz*ysiz)
+                {
+                    Bfree(lastpic);
+                    lastpic = Bmalloc(xsiz*ysiz*sizeof(coltype));
+                }
+                if (lastpic)
+                    Bmemcpy(lastpic, pic, xsiz*ysiz*sizeof(coltype));
+            }
+            else if (lastpic)
+            {
+                Bfree(lastpic); lastpic=NULL;
+                lastfn = NULL;
+                lastsize = 0;
+            }
+        }
 
         r=(glinfo.bgra)?hictinting[dapalnum].r:hictinting[dapalnum].b;
         g=hictinting[dapalnum].g;
@@ -1739,10 +1712,10 @@ int32_t gloadtile_hi(int32_t dapic,int32_t dapalnum, int32_t facen, hicreplctyp 
             {
                 int32_t *lptr = (int32_t *)pic;
                 for (y=0; y<tsizy; y++,lptr+=xsiz)
-                    memcpy(&lptr[tsizx],lptr,(xsiz-tsizx)<<2);
+                    Bmemcpy(&lptr[tsizx],lptr,(xsiz-tsizx)<<2);
             }
             if (ysiz > tsizy)  //Copy top to bottom
-                memcpy(&pic[xsiz*tsizy],pic,(ysiz-tsizy)*xsiz<<2);
+                Bmemcpy(&pic[xsiz*tsizy],pic,(ysiz-tsizy)*xsiz<<2);
         }
         if (!glinfo.bgra)
         {
@@ -1752,7 +1725,7 @@ int32_t gloadtile_hi(int32_t dapic,int32_t dapalnum, int32_t facen, hicreplctyp 
             }
         }
         else texfmt = GL_BGRA;
-        free(picfil); picfil = 0;
+        Bfree(picfil); picfil = 0;
 
         if (tsizx>>r_downsize <= tilesizx[dapic] || tsizy>>r_downsize <= tilesizy[dapic])
             hicr->flags |= 17;
@@ -1803,7 +1776,7 @@ int32_t gloadtile_hi(int32_t dapic,int32_t dapalnum, int32_t facen, hicreplctyp 
         bglTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,glinfo.clamptoedge?GL_CLAMP_TO_EDGE:GL_CLAMP);
     }
 
-    if (pic) free(pic);
+    if (pic) Bfree(pic);
 
     if (tsizx>>r_downsize <= tilesizx[dapic] || tsizy>>r_downsize <= tilesizy[dapic])
         hicr->flags |= 17;
@@ -2103,13 +2076,13 @@ void drawpoly(double *dpx, double *dpy, int32_t n, int32_t method)
             {
             default:
             case 0:
-                pc[3] = 1.0; break;
+                pc[3] = 1.0f; break;
             case 1:
-                pc[3] = 1.0; break;
+                pc[3] = 1.0f; break;
             case 2:
-                pc[3] = 0.66; break;
+                pc[3] = 0.66f; break;
             case 3:
-                pc[3] = 0.33; break;
+                pc[3] = 0.33f; break;
             }
             // tinting happens only to hightile textures, and only if the texture we're
             // rendering isn't for the same palette as what we asked for
@@ -2332,7 +2305,7 @@ void drawpoly(double *dpx, double *dpy, int32_t n, int32_t method)
         {
             zbufbpl = bytesperline;
             zbufysiz = ydim;
-            zbufmem = (intptr_t)realloc((void *)zbufmem,zbufbpl*zbufysiz*4);
+            zbufmem = (intptr_t)Brealloc((void *)zbufmem,zbufbpl*zbufysiz*4);
         }
         zbufoff = (int32_t *)(zbufmem-(frameplace<<2));
 #endif
@@ -2783,7 +2756,7 @@ void domost(float x0, float y0, float x1, float y1)
     if (x0 < x1)
     {
         dir = 1; //clip dmost (floor)
-        y0 -= .01; y1 -= .01;
+        y0 -= .01f; y1 -= .01f;
     }
     else
     {
@@ -3865,7 +3838,7 @@ static void polymost_drawalls(int32_t bunch)
                 i = (1<<(picsiz[globalpicnum]>>4)); if (i < tilesizy[globalpicnum]) i <<= 1;
 
                 ypan = wal->ypanning;
-                yoffs=(i-tilesizy[globalpicnum])*(255./i);
+                ftol((i-tilesizy[globalpicnum])*(255.f/i),&yoffs);
                 if (wal->cstat&4)
                 {
                     if (ypan>256-yoffs)
@@ -3922,7 +3895,7 @@ static void polymost_drawalls(int32_t bunch)
                 i = (1<<(picsiz[globalpicnum]>>4)); if (i < tilesizy[globalpicnum]) i <<= 1;
 
                 ypan = nwal->ypanning;
-                yoffs=(i-tilesizy[globalpicnum])*(255./i);
+                ftol((i-tilesizy[globalpicnum])*(255.f/i),&yoffs);
                 if (!(nwal->cstat&4))
                 {
                     if (ypan>256-yoffs)
@@ -3977,7 +3950,7 @@ static void polymost_drawalls(int32_t bunch)
             i = (1<<(picsiz[globalpicnum]>>4)); if (i < tilesizy[globalpicnum]) i <<= 1;
 
             ypan = wal->ypanning;
-            yoffs=(i-tilesizy[globalpicnum])*(255./i);
+            ftol((i-tilesizy[globalpicnum])*(255.f/i),&yoffs);
             if (!(wal->cstat&4))
             {
                 if (ypan>256-yoffs)
@@ -4305,7 +4278,7 @@ void polymost_drawrooms()
         searchsector = hitinfo.hitsect;
         if (hitinfo.pos.z<cz) searchstat = 1; else if (hitinfo.pos.z>fz) searchstat = 2; else if (hitinfo.hitwall >= 0)
         {
-            searchwall = hitinfo.hitwall; searchstat = 0;
+            searchbottomwall = searchwall = hitinfo.hitwall; searchstat = 0;
             if (wall[hitinfo.hitwall].nextwall >= 0)
             {
                 int32_t cz, fz;
@@ -4313,7 +4286,7 @@ void polymost_drawrooms()
                 if (hitinfo.pos.z > fz)
                 {
                     if (wall[hitinfo.hitwall].cstat&2) //'2' bottoms of walls
-                        searchwall = wall[hitinfo.hitwall].nextwall;
+                        searchbottomwall = wall[hitinfo.hitwall].nextwall;
                 }
                 else if ((hitinfo.pos.z > cz) && (wall[hitinfo.hitwall].cstat&(16+32))) //masking or 1-way
                     searchstat = 4;
@@ -4326,6 +4299,46 @@ void polymost_drawrooms()
             getzsofslope(hitinfo.hitsect,hitinfo.pos.x,hitinfo.pos.y,&cz,&fz);
             if ((hitinfo.pos.z<<1) < cz+fz) searchstat = 1; else searchstat = 2;
             //if (vz < 0) searchstat = 1; else searchstat = 2; //Won't work for slopes :/
+        }
+
+        if ((searchstat==1 || searchstat==2) && searchsector>=0)
+        {
+            int32_t scrv[2] = {(vx>>12), (vy>>12)};
+            int32_t scrv_r[2] = {scrv[1], -scrv[0]};
+            walltype *wal = &wall[sector[searchsector].wallptr];
+            int32_t wdistsq, bestwdistsq=0x7fffffff;
+            int16_t k, bestk=-1;
+
+            for (k=0; k<sector[searchsector].wallnum; k++)
+            {
+                int32_t w1[2] = {wal[k].x, wal[k].y};
+                int32_t w2[2] = {wall[wal[k].point2].x, wall[wal[k].point2].y};
+                int32_t w21[2] = {w1[0]-w2[0], w1[1]-w2[1]};
+                int32_t pw1[2] = {w1[0]-hitinfo.pos.x, w1[1]-hitinfo.pos.y};
+                int32_t pw2[2] = {w2[0]-hitinfo.pos.x, w2[1]-hitinfo.pos.y};
+                float w1d = (float)(scrv_r[0]*pw1[0] + scrv_r[1]*pw1[1]);
+                float w2d = (float)(scrv_r[0]*pw2[0] + scrv_r[1]*pw2[1]);
+                int32_t ptonline[2], scrp[2];
+
+                w2d = -w2d;
+                if ((w1d==0 && w2d==0) || (w1d<0 || w2d<0))
+                    continue;
+                ptonline[0] = (int32_t)(w2[0]+(w2d/(w1d+w2d))*w21[0]);
+                ptonline[1] = (int32_t)(w2[1]+(w2d/(w1d+w2d))*w21[1]);
+                scrp[0] = ptonline[0]-vect.x;
+                scrp[1] = ptonline[1]-vect.y;
+                if (scrv[0]*scrp[0] + scrv[1]*scrp[1] <= 0)
+                    continue;
+                wdistsq = scrp[0]*scrp[0] + scrp[1]*scrp[1];
+                if (wdistsq < bestwdistsq)
+                {
+                    bestk = k;
+                    bestwdistsq = wdistsq;
+                }
+            }
+
+            if (bestk >= 0)
+                searchwall = sector[searchsector].wallptr + bestk;
         }
         searchit = 0;
     }
@@ -4567,16 +4580,6 @@ int32_t lastcullcheck = 0;
 char cullmodel[MAXSPRITES];
 int32_t cullcheckcnt = 0;
 
-#ifndef _MSC_VER
-#if defined (__GNUC__) && defined(__i386__)
-#ifndef __fastcall
-#define __fastcall __attribute__((fastcall))
-#endif
-#else
-#define __fastcall
-#endif
-#endif
-
 int32_t __fastcall polymost_checkcoordinates(int32_t x, int32_t y, spritetype *tspr)
 {
     int16_t datempsectnum = tspr->sectnum;
@@ -4717,7 +4720,6 @@ void polymost_drawsprite(int32_t snum)
             if (mddraw(tspr)) return;
             break;	// else, render as flat sprite
         }
-#ifdef SUPERBUILD
         if (usevoxels && (tspr->cstat&48)!=48 && tiletovox[tspr->picnum] >= 0 && voxmodels[ tiletovox[tspr->picnum] ])
         {
             if (voxdraw(voxmodels[ tiletovox[tspr->picnum] ], tspr)) return;
@@ -4728,7 +4730,6 @@ void polymost_drawsprite(int32_t snum)
             voxdraw(voxmodels[ tspr->picnum ], tspr);
             return;
         }
-#endif
         break;
     }
     if (((tspr->cstat&2) || (gltexmayhavealpha(tspr->picnum,tspr->pal))))
@@ -4981,10 +4982,10 @@ void polymost_drawsprite(int32_t snum)
         i = (tspr->ang&2047);
         c = sintable[(i+512)&2047]/65536.0;
         s = sintable[i]/65536.0;
-        x0 = ((tsizx>>1)-xoff)*tspr->xrepeat;
-        y0 = ((tsizy>>1)-yoff)*tspr->yrepeat;
-        x1 = ((tsizx>>1)+xoff)*tspr->xrepeat;
-        y1 = ((tsizy>>1)+yoff)*tspr->yrepeat;
+        x0 = (float)((tsizx>>1)-xoff)*tspr->xrepeat;
+        y0 = (float)((tsizy>>1)-yoff)*tspr->yrepeat;
+        x1 = (float)((tsizx>>1)+xoff)*tspr->xrepeat;
+        y1 = (float)((tsizy>>1)+yoff)*tspr->yrepeat;
 
         //Project 3D to 2D
         for (j=0; j<4; j++)
@@ -5199,7 +5200,7 @@ void polymost_dorotatesprite(int32_t sx, int32_t sy, int32_t z, int16_t a, int16
                 m[2][2] = 1.0; m[2][3] = (float)ydimen*(ratioratio >= 1.6?1.2:1);
                 m[3][2] =-1.0;
             }
-            else { m[0][0] = m[2][3] = 1.0; m[1][1] = ((float)xdim)/((float)ydim); m[2][2] = 1.0001; m[3][2] = 1-m[2][2]; }
+            else { m[0][0] = m[2][3] = 1.0f; m[1][1] = ((float)xdim)/((float)ydim); m[2][2] = 1.0001f; m[3][2] = 1-m[2][2]; }
             bglLoadMatrixf(&m[0][0]);
             bglMatrixMode(GL_MODELVIEW);
             bglLoadIdentity();
@@ -5266,7 +5267,7 @@ void polymost_dorotatesprite(int32_t sx, int32_t sy, int32_t z, int16_t a, int16
         bglViewport(0,0,xdim,ydim); glox1 = -1; //Force fullscreen (glox1=-1 forces it to restore)
         bglMatrixMode(GL_PROJECTION);
         memset(m,0,sizeof(m));
-        m[0][0] = m[2][3] = 1.0; m[1][1] = ((float)xdim)/((float)ydim); m[2][2] = 1.0001; m[3][2] = 1-m[2][2];
+        m[0][0] = m[2][3] = 1.0f; m[1][1] = ((float)xdim)/((float)ydim); m[2][2] = 1.0001f; m[3][2] = 1-m[2][2];
         bglPushMatrix(); bglLoadMatrixf(&m[0][0]);
         bglMatrixMode(GL_MODELVIEW);
         bglLoadIdentity();
@@ -5451,9 +5452,9 @@ static void tessectrap(float *px, float *py, int32_t *point2, int32_t numpoints)
     if (numpoints+16 > allocpoints) //16 for safety
     {
         allocpoints = numpoints+16;
-        rst = (raster*)realloc(rst,allocpoints*sizeof(raster));
-        slist = (int32_t*)realloc(slist,allocpoints*sizeof(int32_t));
-        npoint2 = (int32_t*)realloc(npoint2,allocpoints*sizeof(int32_t));
+        rst = (raster*)Brealloc(rst,allocpoints*sizeof(raster));
+        slist = (int32_t*)Brealloc(slist,allocpoints*sizeof(int32_t));
+        npoint2 = (int32_t*)Brealloc(npoint2,allocpoints*sizeof(int32_t));
     }
 
     //Remove unnecessary collinear points:
@@ -5610,11 +5611,11 @@ void polymost_fillpolygon(int32_t npoints)
     {
     case 0:
     case 1:
-        a = 1.0; bglDisable(GL_BLEND); break;
+        a = 1.0f; bglDisable(GL_BLEND); break;
     case 2:
-        a = 0.66; bglEnable(GL_BLEND); break;
+        a = 0.66f; bglEnable(GL_BLEND); break;
     case 3:
-        a = 0.33; bglEnable(GL_BLEND); break;
+        a = 0.33f; bglEnable(GL_BLEND); break;
     }
     bglColor4f(f,f,f,a);
 
@@ -5780,7 +5781,7 @@ int32_t polymost_printext256(int32_t xpos, int32_t ypos, int16_t col, int16_t ba
         bglTexImage2D(GL_TEXTURE_2D,0,GL_ALPHA,256,128,0,GL_ALPHA,GL_UNSIGNED_BYTE,(GLvoid*)tbuf);
         bglTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
         bglTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
-        free(tbuf);
+        Bfree(tbuf);
     }
     else bglBindTexture(GL_TEXTURE_2D, polymosttext);
 
@@ -5800,6 +5801,9 @@ int32_t polymost_printext256(int32_t xpos, int32_t ypos, int16_t col, int16_t ba
         bglVertex2i(xpos+(c<<(3-fontsize)),ypos);
         bglEnd();
     }
+
+    bglPushAttrib(GL_POLYGON_BIT);  // we want to have readable text in wireframe mode, too
+    bglPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
     bglEnable(GL_TEXTURE_2D);
     bglEnable(GL_BLEND);
@@ -5847,6 +5851,7 @@ int32_t polymost_printext256(int32_t xpos, int32_t ypos, int16_t col, int16_t ba
     bglEnd();
 
     bglDepthMask(GL_TRUE);	// re-enable writing to the z-buffer
+    bglPopAttrib();
 
     return 0;
 #endif
@@ -5931,6 +5936,17 @@ static int32_t osdcmd_cvar_set_polymost(const osdfuncparm_t *parm)
             gltexturemode(parm);
             return r;
         }
+#ifdef POLYMER
+        else if (!Bstrcasecmp(parm->name, "r_pr_maxlightpasses"))
+        {
+            if (pr_maxlightpasses != r_pr_maxlightpasses)
+            {
+                polymer_invalidatelights();
+                pr_maxlightpasses = r_pr_maxlightpasses;
+            }
+            return r;
+        }
+#endif
     }
 #endif
     return r;
@@ -5949,23 +5965,22 @@ void polymost_initosdfuncs(void)
         { "r_downsize","r_downsize: controls downsizing factor for hires textures",(void *)&r_downsizevar, CVAR_INT|CVAR_FUNCPTR, 0, 0, 5 },
         { "r_fullbrights","r_fullbrights: enable/disable fullbright textures",(void *)&r_fullbrights, CVAR_BOOL, 0, 0, 1 },
         { "r_glowmapping","r_glowmapping: enable/disable glow mapping",(void *)&r_glowmapping, CVAR_BOOL, 0, 0, 1 },
-/*
-        { "r_multisample","r_multisample: sets the number of samples used for antialiasing (0 = off)",(void *)&r_glowmapping, CVAR_BOOL, 0, 0, 1 }
-        { "r_nvmultisamplehint","r_nvmultisamplehint: enable/disable Nvidia multisampling hinting",(void *)&glnvmultisamplehint, CVAR_BOOL, 0, 0, 1 }
-*/
+        /*
+                { "r_multisample","r_multisample: sets the number of samples used for antialiasing (0 = off)",(void *)&r_glowmapping, CVAR_BOOL, 0, 0, 1 }
+                { "r_nvmultisamplehint","r_nvmultisamplehint: enable/disable Nvidia multisampling hinting",(void *)&glnvmultisamplehint, CVAR_BOOL, 0, 0, 1 }
+        */
         { "r_parallaxskyclamping","r_parallaxskyclamping: enable/disable parallaxed floor/ceiling sky texture clamping",
-                (void *)&r_parallaxskyclamping, CVAR_BOOL, 0, 0, 1 },
+          (void *)&r_parallaxskyclamping, CVAR_BOOL, 0, 0, 1 },
         { "r_parallaxskypanning","r_parallaxskypanning: enable/disable parallaxed floor/ceiling panning when drawing a parallaxed sky",
-                (void *)&r_parallaxskypanning, CVAR_BOOL, 0, 0, 1 },
-        { "r_polygonmode","r_polygonmode: debugging feature",(void *)&glpolygonmode, CVAR_INT, 0, 0, 3 },
+          (void *)&r_parallaxskypanning, CVAR_BOOL, 0, 0, 1 },
+        { "r_polygonmode","r_polygonmode: debugging feature",(void *)&glpolygonmode, CVAR_INT | CVAR_NOSAVE, 0, 0, 3 },
         { "r_redbluemode","r_redbluemode: enable/disable experimental OpenGL red-blue glasses mode",(void *)&glredbluemode, CVAR_BOOL, 0, 0, 1 },
         { "r_shadescale","r_shadescale: multiplier for lighting",(void *)&shadescale, CVAR_FLOAT, 0, 0, 10 },
         { "r_swapinterval","r_swapinterval: sets the GL swap interval (VSync)",(void *)&vsync, CVAR_BOOL|CVAR_FUNCPTR, 0, 0, 1 },
-        { "r_texcachecompression","r_texcachecompression: enable/disable compression of files in the OpenGL compressed texture cache",(void *)&glusetexcachecompression, CVAR_BOOL, 0, 0, 1 },
-        { "r_texcache","r_texcache: enable/disable OpenGL compressed texture cache",(void *)&glusetexcache, CVAR_BOOL, 0, 0, 1 },
-        { "r_texcompr","r_texcompr: enable/disable OpenGL texture compression",(void *)&glusetexcompr, CVAR_BOOL, 0, 0, 1 }, 
+        { "r_texcache","r_texcache: enable/disable OpenGL compressed texture cache",(void *)&glusetexcache, CVAR_INT, 0, 0, 2 },
+        { "r_texcompr","r_texcompr: enable/disable OpenGL texture compression",(void *)&glusetexcompr, CVAR_BOOL, 0, 0, 1 },
         { "r_textureanisotropy", "r_textureanisotropy: changes the OpenGL texture anisotropy setting", (void *)&glanisotropy, CVAR_INT|CVAR_FUNCPTR, 0, 0, 16 },
-        { "r_texturemaxsize","r_texturemaxsize: changes the maximum OpenGL texture size limit",(void *)&gltexmaxsize, CVAR_INT, 0, 0, 4096 },
+        { "r_texturemaxsize","r_texturemaxsize: changes the maximum OpenGL texture size limit",(void *)&gltexmaxsize, CVAR_INT | CVAR_NOSAVE, 0, 0, 4096 },
         { "r_texturemiplevel","r_texturemiplevel: changes the highest OpenGL mipmap level used",(void *)&gltexmiplevel, CVAR_INT, 0, 0, 6 },
         { "r_texturemode", "r_texturemode: changes the texture filtering settings", (void *)&gltexfiltermode, CVAR_INT|CVAR_FUNCPTR, 0, 0, 5 },
         { "r_vbocount","r_vbocount: sets the number of Vertex Buffer Objects to use when drawing models",(void *)&r_vbocount, CVAR_INT, 0, 1, 256 },
@@ -5982,24 +5997,28 @@ void polymost_initosdfuncs(void)
         { "r_pr_shadows", "r_pr_shadows: enable/disable dynamic shadows", (void*)&pr_shadows, CVAR_BOOL, 0, 0, 1 },
         { "r_pr_shadowcount", "r_pr_shadowcount: maximal amount of shadow emitting lights on screen - you need to restart the renderer for it to take effect", (void*)&pr_shadowcount, CVAR_INT, 0, 0, 64 },
         { "r_pr_shadowdetail", "r_pr_shadowdetail: sets the shadow map resolution - you need to restart the renderer for it to take effect", (void*)&pr_shadowdetail, CVAR_INT, 0, 0, 5 },
-        { "r_pr_maxlightpasses", "r_pr_maxlightpasses: the maximal amount of lights a single object can by affected by", (void*)&pr_maxlightpasses, CVAR_INT, 0, 0, 512 },
+        { "r_pr_shadowfiltering", "r_pr_shadowfiltering: enable/disable shadow edges filtering - you need to restart the renderer for it to take effect", (void*)&pr_shadowfiltering, CVAR_BOOL, 0, 0, 1 },
+        { "r_pr_maxlightpasses", "r_pr_maxlightpasses: the maximal amount of lights a single object can by affected by", (void*)&r_pr_maxlightpasses, CVAR_INT|CVAR_FUNCPTR, 0, 0, PR_MAXLIGHTS },
         { "r_pr_maxlightpriority", "r_pr_maxlightpriority: lowering that value removes less meaningful lights from the scene", (void*)&pr_maxlightpriority, CVAR_INT, 0, 0, PR_MAXLIGHTPRIORITY },
         { "r_pr_fov", "r_pr_fov: sets the field of vision in build angle", (void*)&pr_fov, CVAR_INT, 0, 0, 1023},
+        { "r_pr_customaspect", "r_pr_customaspect: if non-zero, forces the 3D view aspect ratio", (void*)&pr_customaspect, CVAR_FLOAT, 0, 0, 3 },
         { "r_pr_billboardingmode", "r_pr_billboardingmode: face sprite display method. 0: classic mode; 1: polymost mode", (void*)&pr_billboardingmode, CVAR_INT, 0, 0, 1 },
         { "r_pr_verbosity", "r_pr_verbosity: verbosity level of the polymer renderer", (void*)&pr_verbosity, CVAR_INT, 0, 0, 3 },
-        { "r_pr_wireframe", "r_pr_wireframe: toggles wireframe mode", (void*)&pr_wireframe, CVAR_INT, 0, 0, 1 },
+        { "r_pr_wireframe", "r_pr_wireframe: toggles wireframe mode", (void*)&pr_wireframe, CVAR_INT | CVAR_NOSAVE, 0, 0, 1 },
         { "r_pr_vbos", "r_pr_vbos: contols Vertex Buffer Object usage. 0: no VBOs. 1: VBOs for map data. 2: VBOs for model data.", (void*)&pr_vbos, CVAR_INT, 0, 0, 2 },
         { "r_pr_gpusmoothing", "r_pr_gpusmoothing: toggles model animation interpolation", (void*)&pr_gpusmoothing, CVAR_INT, 0, 0, 1 },
-        { "r_pr_overrideparallax", "r_pr_overrideparallax: overrides parallax mapping scale and bias values with values from the pr_parallaxscale and pr_parallaxbias cvars; use it to fine-tune DEF tokens", (void*)&pr_overrideparallax, CVAR_BOOL, 0, 0, 1 },
-        { "r_pr_parallaxscale", "r_pr_parallaxscale: overriden parallax mapping offset scale", (void*)&pr_parallaxscale, CVAR_FLOAT, 0, -10, 10 },
-        { "r_pr_parallaxbias", "r_pr_parallaxbias: overriden parallax mapping offset bias", (void*)&pr_parallaxbias, CVAR_FLOAT, 0, -10, 10 },
-        { "r_pr_overridespecular", "r_pr_overridespecular: overrides specular material power and factor values with values from the pr_specularpower and pr_specularfactor cvars; use it to fine-tune DEF tokens", (void*)&pr_overridespecular, CVAR_BOOL, 0, 0, 1 },
-        { "r_pr_specularpower", "r_pr_specularpower: overriden specular material power", (void*)&pr_specularpower, CVAR_FLOAT, 0, -10, 1000 },
-        { "r_pr_specularfactor", "r_pr_specularfactor: overriden specular material factor", (void*)&pr_specularfactor, CVAR_FLOAT, 0, -10, 1000 },
+        { "r_pr_overrideparallax", "r_pr_overrideparallax: overrides parallax mapping scale and bias values with values from the pr_parallaxscale and pr_parallaxbias cvars; use it to fine-tune DEF tokens", (void*)&pr_overrideparallax, CVAR_BOOL | CVAR_NOSAVE, 0, 0, 1 },
+        { "r_pr_parallaxscale", "r_pr_parallaxscale: overriden parallax mapping offset scale", (void*)&pr_parallaxscale, CVAR_FLOAT | CVAR_NOSAVE, 0, -10, 10 },
+        { "r_pr_parallaxbias", "r_pr_parallaxbias: overriden parallax mapping offset bias", (void*)&pr_parallaxbias, CVAR_FLOAT | CVAR_NOSAVE, 0, -10, 10 },
+        { "r_pr_overridespecular", "r_pr_overridespecular: overrides specular material power and factor values with values from the pr_specularpower and pr_specularfactor cvars; use it to fine-tune DEF tokens", (void*)&pr_overridespecular, CVAR_BOOL | CVAR_NOSAVE, 0, 0, 1 },
+        { "r_pr_specularpower", "r_pr_specularpower: overriden specular material power", (void*)&pr_specularpower, CVAR_FLOAT | CVAR_NOSAVE, 0, -10, 1000 },
+        { "r_pr_specularfactor", "r_pr_specularfactor: overriden specular material factor", (void*)&pr_specularfactor, CVAR_FLOAT | CVAR_NOSAVE, 0, -10, 1000 },
+        { "r_pr_ati_fboworkaround", "r_pr_ati_fboworkaround: enable this to workaround an ATI driver bug that causes sprite shadows to be square - you need to restart the renderer for it to take effect", (void*)&pr_ati_fboworkaround, CVAR_BOOL | CVAR_NOSAVE, 0, 0, 1 },
+        { "r_pr_ati_nodepthoffset", "r_pr_ati_nodepthoffset: enable this to workaround an ATI driver bug that causes sprite drawing to freeze the game on Radeon X1x00 hardware - you need to restart the renderer for it to take effect", (void*)&pr_ati_nodepthoffset, CVAR_BOOL | CVAR_NOSAVE, 0, 0, 1 },
 #endif
 
-        { "r_models","r_models: enable/disable model rendering in >8-bit mode",(void *)&usemodels, CVAR_BOOL, 0, 0, 1 },
-        { "r_hightile","r_hightile: enable/disable hightile texture rendering in >8-bit mode",(void *)&usehightile, CVAR_BOOL, 0, 0, 1 },
+        { "r_models","r_models: enable/disable model rendering",(void *)&usemodels, CVAR_BOOL, 0, 0, 1 },
+        { "r_hightile","r_hightile: enable/disable hightile texture rendering",(void *)&usehightile, CVAR_BOOL, 0, 0, 1 },
 #endif
     };
 
@@ -6033,7 +6052,7 @@ void polymost_precache(int32_t dapicnum, int32_t dapalnum, int32_t datype)
     gltexcache(dapicnum, dapalnum, (datype & 1) << 2);
     hicprecaching = 0;
 
-    if (datype == 0) return;
+    if (datype == 0 || !usemodels) return;
 
     mid = md_tilehasmodel(dapicnum,dapalnum);
     if (mid < 0 || models[mid]->mdnum < 2) return;
@@ -6114,11 +6133,11 @@ int32_t dxtfilter(int32_t fil, texcachepicture *pict, char *pic, void *midbuf, c
     void *writebuf;
 #if (USEKENFILTER == 0)
     uint32_t cleng,j;
-    if (glusetexcachecompression)
+    if (glusetexcache == 2)
     {
 #ifdef USELZF
-        cleng = lzf_compress(pic, miplen, packbuf, miplen-1);
-        if (cleng == 0)
+        cleng = qlz_compress(pic, packbuf, miplen, state_compress);
+        if (cleng == 0 || cleng > j-1)
         {
             // failed to compress
             cleng = miplen;
@@ -6155,29 +6174,29 @@ int32_t dxtfilter(int32_t fil, texcachepicture *pict, char *pic, void *midbuf, c
         for (k=0; k<8; k++) *cptr++ = pic[k];
         for (j=stride; (unsigned)j<miplen; j+=stride)
             for (k=0; k<8; k++) *cptr++ = pic[j+k];
-        if (glusetexcachecompression)
+        if (glusetexcache == 2)
         {
 #ifdef USELZF
-            j = (miplen/stride)*8;
-            cleng = lzf_compress(midbuf,j,packbuf,j-1);
-            if (cleng == 0)
+            j = (miplen/stride)<<3;
+            cleng = qlz_compress(midbuf,packbuf,j,state_compress);
+            if (cleng == 0 || cleng > j-1)
             {
                 cleng = j;
                 writebuf = midbuf;
             }
             else writebuf = packbuf;
 #else
-    cleng = lzwcompress(midbuf,(miplen/stride)*8,packbuf);
-    writebuf = packbuf;
+            cleng = lzwcompress(midbuf,(miplen/stride)*8,packbuf);
+            writebuf = packbuf;
 #endif
         }
         else
         {
-            cleng = (miplen/stride)*8;
+            cleng = (miplen/stride)<<3;
             writebuf = midbuf;
         }
         j = B_LITTLE32(cleng);
-        Bwrite(fil,&j,4);
+        Bwrite(fil,&j,sizeof(j));
         Bwrite(fil,writebuf,cleng);
     }
 
@@ -6186,29 +6205,29 @@ int32_t dxtfilter(int32_t fil, texcachepicture *pict, char *pic, void *midbuf, c
     for (k=0; k<=2; k+=2)
         for (j=0; (unsigned)j<miplen; j+=stride)
             { *(int16_t *)cptr = hicosub(*(int16_t *)(&pic[offs+j+k])); cptr += 2; }
-    if (glusetexcachecompression)
+    if (glusetexcache == 2)
     {
 #ifdef USELZF
-        j = (miplen/stride)*4;
-        cleng = lzf_compress(midbuf,j,packbuf,j-1);
-        if (cleng == 0)
+        j = (miplen/stride)<<2;
+        cleng = qlz_compress(midbuf,packbuf,j,state_compress);
+        if (cleng == 0 || cleng > j-1)
         {
             cleng = j;
             writebuf = midbuf;
         }
         else writebuf = packbuf;
 #else
-    cleng = lzwcompress(midbuf,(miplen/stride)*4,packbuf);
-    writebuf = packbuf;
+        cleng = lzwcompress(midbuf,(miplen/stride)*4,packbuf);
+        writebuf = packbuf;
 #endif
     }
     else
     {
-        cleng = (miplen/stride)*4;
+        cleng = (miplen/stride)<<2;
         writebuf = midbuf;
     }
     j = B_LITTLE32(cleng);
-    Bwrite(fil,&j,4);
+    Bwrite(fil,&j,sizeof(j));
     Bwrite(fil,writebuf,cleng);
 
     //index_4x4
@@ -6222,29 +6241,29 @@ int32_t dxtfilter(int32_t fil, texcachepicture *pict, char *pic, void *midbuf, c
         cptr[3] = ((c2[0]>>6)&3) + (((c2[1]>>6)&3)<<2) + (((c2[2]>>6)&3)<<4) + (((c2[3]>>6)&3)<<6);
         cptr += 4;
     }
-    if (glusetexcachecompression)
+    if (glusetexcache == 2)
     {
 #ifdef USELZF
-        j = (miplen/stride)*4;
-        cleng = lzf_compress(midbuf,j,packbuf,j-1);
-        if (cleng == 0)
+        j = (miplen/stride)<<2;
+        cleng = qlz_compress(midbuf,packbuf,j,state_compress);
+        if (cleng == 0 || cleng > j-1)
         {
             cleng = j;
             writebuf = midbuf;
         }
         else writebuf = packbuf;
 #else
-    cleng = lzwcompress(midbuf,(miplen/stride)*4,packbuf);
-    writebuf = packbuf;
+        cleng = lzwcompress(midbuf,(miplen/stride)*4,packbuf);
+        writebuf = packbuf;
 #endif
     }
     else
     {
-        cleng = (miplen/stride)*4;
+        cleng = (miplen/stride)<<2;
         writebuf = midbuf;
     }
     j = B_LITTLE32(cleng);
-    Bwrite(fil,&j,4);
+    Bwrite(fil,&j,sizeof(j));
     Bwrite(fil,writebuf,cleng);
 #endif
     return 0;
@@ -6255,15 +6274,15 @@ int32_t dedxtfilter(int32_t fil, texcachepicture *pict, char *pic, void *midbuf,
     void *inbuf;
 #if (USEKENFILTER == 0)
     uint32_t cleng;
-    if (kread(fil, &cleng, sizeof(uint32_t)) != sizeof(uint32_t)) return -1; cleng = B_LITTLE32(cleng);
+    if (Bread(fil, &cleng, sizeof(uint32_t)) != sizeof(uint32_t)) return -1; cleng = B_LITTLE32(cleng);
 #ifdef USELZF
     if (ispacked && cleng < pict->size) inbuf = packbuf; else inbuf = pic;
-    if (kread(fil, inbuf, cleng) != cleng) return -1;
+    if (Bread(fil, inbuf, cleng) != cleng) return -1;
     if (ispacked && cleng < pict->size)
-        if (lzf_decompress(packbuf, cleng, pic, pict->size) == 0) return -1;
+        if (qlz_decompress(packbuf, pic, state_decompress) == 0) return -1;
 #else
     if (ispacked) inbuf = packbuf; else inbuf = pic;
-    if (kread(fil, inbuf, cleng) != cleng) return -1;
+    if (Bread(fil, inbuf, cleng) != cleng) return -1;
     if (ispacked && lzwuncompress(packbuf, cleng, pic, pict->size) != pict->size) return -1;
 #endif
 #else
@@ -6287,7 +6306,7 @@ int32_t dedxtfilter(int32_t fil, texcachepicture *pict, char *pic, void *midbuf,
         if (ispacked && cleng < j) inbuf = packbuf; else inbuf = midbuf;
         if (Bread(fil,inbuf,cleng) < cleng) return -1;
         if (ispacked && cleng < j)
-            if (lzf_decompress(packbuf,cleng,midbuf,j) == 0) return -1;
+            if (qlz_decompress(packbuf,midbuf,state_decompress) == 0) return -1;
 #else
     if (Bread(fil,inbuf,cleng) < cleng) return -1;
     if (ispacked && lzwuncompress(packbuf,cleng,midbuf,j) != j) return -1;
@@ -6305,7 +6324,7 @@ int32_t dedxtfilter(int32_t fil, texcachepicture *pict, char *pic, void *midbuf,
     if (ispacked && cleng < j) inbuf = packbuf; else inbuf = midbuf;
     if (Bread(fil,inbuf,cleng) < cleng) return -1;
     if (ispacked && cleng < j)
-        if (lzf_decompress(packbuf,cleng,midbuf,j) == 0) return -1;
+        if (qlz_decompress(packbuf,midbuf,state_decompress) == 0) return -1;
 #else
     if (Bread(fil,inbuf,cleng) < cleng) return -1;
     if (ispacked && lzwuncompress(packbuf,cleng,midbuf,j) != j) return -1;
@@ -6325,7 +6344,7 @@ int32_t dedxtfilter(int32_t fil, texcachepicture *pict, char *pic, void *midbuf,
     if (ispacked && cleng < j) inbuf = packbuf; else inbuf = midbuf;
     if (Bread(fil,inbuf,cleng) < cleng) return -1;
     if (ispacked && cleng < j)
-        if (lzf_decompress(packbuf,cleng,midbuf,j) == 0) return -1;
+        if (qlz_decompress(packbuf,midbuf,state_decompress) == 0) return -1;
 #else
     if (Bread(fil,inbuf,cleng) < cleng) return -1;
     if (ispacked && lzwuncompress(packbuf,cleng,midbuf,j) != j) return -1;

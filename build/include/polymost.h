@@ -3,17 +3,18 @@
 
 #ifdef POLYMOST
 
+#include "hightile.h"
+
 #define CULL_OFFSET 384
 #define CULL_DELAY 2
 #define MAXCULLCHECKS 1024
-
-#define FOGSCALE 0.0000640
 
 extern int32_t lastcullcheck;
 extern char cullmodel[MAXSPRITES];
 extern int32_t cullcheckcnt;
 
 #define PI 3.14159265358979323
+extern char TEXCACHEFILE[BMAX_PATH];
 
 typedef struct { char r, g, b, a; } coltype;
 
@@ -78,6 +79,8 @@ struct cacheitem_t
 
 typedef struct cacheitem_t texcacheindex;
 
+#define TEXCACHEMAGIC "QLZ1"
+
 extern texcacheindex *firstcacheindex;
 extern texcacheindex *curcacheindex;
 extern texcacheindex *cacheptrs[MAXTILES<<1];
@@ -123,19 +126,20 @@ extern double gyxscale, gxyaspect, gviewxrange, ghalfx, grhalfxdown10, grhalfxdo
 extern double gcosang, gsinang, gcosang2, gsinang2;
 extern double gchang, gshang, gctang, gstang, gvisibility;
 
+#define FOGSCALE 0.0000768
+
 extern float fogresult, fogcol[4], fogtable[4*MAXPALOOKUPS];
 
 static inline void fogcalc(const int32_t shade, const int32_t vis, const int32_t pal)
 {
-    float f = ((shade*shade)*0.125f);
+    float f = shade * 1.75f;
 
-    if (shade < 0) f = -f;
-    if (vis > 239) f = gvisibility*((vis-240+f)/(klabs(vis-256)));
-    else f = gvisibility*(vis+16+f);
+    if (vis > 239) f = (float)(gvisibility*((vis-240+f)/(klabs(vis-256))));
+    else f = (float)(gvisibility*(vis+16+f));
 
-    fogresult = clamp(f, 0.01f, 10.f);
+    fogresult = clamp(f, 0.01f, 100.f);
 
-    Bmemcpy(fogcol,&fogtable[pal<<2],sizeof(fogcol));
+    Bmemcpy(fogcol, &fogtable[pal<<2], sizeof(fogcol));
 }
 
 

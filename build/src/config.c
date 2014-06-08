@@ -16,7 +16,7 @@ static int32_t vesares[13][2] = {{320,200},{360,200},{320,240},{360,240},{320,40
     {1024,768},{1280,1024},{1600,1200}
 };
 
-static int32_t readconfig(BFILE *fp, const char *key, char *value, unsigned len)
+static int32_t readconfig(BFILE *fp, const char *key, char *value, uint32_t len)
 {
     char buf[1000], *k, *v, *eq;
     int32_t x=0;
@@ -56,6 +56,7 @@ static int32_t readconfig(BFILE *fp, const char *key, char *value, unsigned len)
 }
 
 extern int16_t brightness;
+extern int32_t vsync;
 extern char game_executable[BMAX_PATH];
 extern int32_t fullscreen;
 extern char option[8];
@@ -63,7 +64,8 @@ extern char keys[NUMBUILDKEYS];
 extern char remap[256];
 extern int32_t remapinit;
 extern double msens;
-extern int32_t editorgridextent;
+extern int32_t editorgridextent, grid, autogrid;
+static int32_t default_grid=3;
 extern int32_t showheightindicators;
 extern int32_t graphicsmode;
 extern int32_t AmbienceToggle;
@@ -136,7 +138,15 @@ int32_t loadsetup(const char *fn)
     if (readconfig(fp, "music", val, VL) > 0) { if (Batoi(val) != 0) option[2] = 1; else option[2] = 0; }
     if (readconfig(fp, "mouse", val, VL) > 0) { if (Batoi(val) != 0) option[3] = 1; else option[3] = 0; }
     if (readconfig(fp, "bpp", val, VL) > 0) bppgame = Batoi(val);
+    if (readconfig(fp, "vsync", val, VL) > 0) vsync = Batoi(val)?1:0;
     if (readconfig(fp, "editorgridextent", val, VL) > 0) editorgridextent = max(min(524288,Batoi(val)),65536);
+    if (readconfig(fp, "grid", val, VL) > 0)
+    {
+        grid = Batoi(val);
+        default_grid = grid;
+        autogrid = (grid==9);
+        grid = min(max(0, grid), 8);
+    }
 #ifdef POLYMER
     if (readconfig(fp, "rendmode", val, VL) > 0) { i = Batoi(val); glrendmode = i; }
 #endif
@@ -150,16 +160,13 @@ int32_t loadsetup(const char *fn)
     if (readconfig(fp, "maxrefreshfreq", val, VL) > 0) maxrefreshfreq = Batoi(val);
 #endif
 #if defined(POLYMOST) && defined(USE_OPENGL)
-    glusetexcache = glusetexcachecompression = -1;
+    if (readconfig(fp, "usemodels", val, VL) > 0) usemodels = Batoi(val)?1:0;
+    if (readconfig(fp, "usehightile", val, VL) > 0) usehightile = Batoi(val)?1:0;
+
+    glusetexcache = -1;
     if (readconfig(fp, "glusetexcache", val, VL) > 0)
     {
-        if (Batoi(val) != 0) glusetexcache = 1;
-        else glusetexcache = 0;
-    }
-    if (readconfig(fp, "glusetexcachecompression", val, VL) > 0)
-    {
-        if (Batoi(val) != 0) glusetexcachecompression = 1;
-        else glusetexcachecompression = 0;
+        glusetexcache = clamp(Batoi(val), 0, 2);
     }
     if (readconfig(fp, "gltexfiltermode", val, VL) > 0)
     {
@@ -298,6 +305,8 @@ int32_t writesetup(const char *fn)
              "; 3D-mode colour depth\n"
              "bpp = %d\n"
              "\n"
+             "vsync = %d\n"
+             "\n"
 #ifdef POLYMER
              "; Rendering mode\n"
              "rendmode = %d\n"
@@ -305,11 +314,14 @@ int32_t writesetup(const char *fn)
 #endif
              "; Grid limits\n"
              "editorgridextent = %d\n"
+             "; Startup grid size (0-8, 9 is automatic)\n"
+             "grid = %d\n"
              "\n"
 #if defined(POLYMOST) && defined(USE_OPENGL)
              "; OpenGL mode options\n"
+             "usemodels = %d\n"
+             "usehightile = %d\n"
              "glusetexcache = %d\n"
-             "glusetexcachecompression = %d\n"
              "gltexfiltermode = %d\n"
              "glanisotropy = %d\n"
              "\n"
@@ -441,17 +453,20 @@ int32_t writesetup(const char *fn)
 #endif
 //             "; Console key scancode, in hex\n"
              "keyconsole = %X\n"
-             "; example: make 'Q' function as CapsLock and 'N' as AltGr:\n"
-             "; remap = 10-3A,31-B8\n"
+             "; example: make 'Q' function as CapsLock, KP. as AltGr\n"
+             "; and KP0 as KP5 (counters inability to pan using Shift-KP5-KP8/2\n"
+             "; in 3D mode)\n"
+             "; remap = 10-3A,52-4C,53-B8\n"
              "remap = ",
 
-             forcesetup, fullscreen, xdim2d, ydim2d, xdimgame, ydimgame, bppgame,
+             forcesetup, fullscreen, xdim2d, ydim2d, xdimgame, ydimgame, bppgame, vsync,
 #ifdef POLYMER
              glrendmode,
 #endif
-             editorgridextent,
+             editorgridextent, min(max(0, default_grid), 9),
 #if defined(POLYMOST) && defined(USE_OPENGL)
-             glusetexcache, glusetexcachecompression, gltexfiltermode, glanisotropy,
+             usemodels, usehightile,
+             glusetexcache, gltexfiltermode, glanisotropy,
 #endif
 #ifdef RENDERTYPEWIN
              maxrefreshfreq, windowpos, windowx, windowy,

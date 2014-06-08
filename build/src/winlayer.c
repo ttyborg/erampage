@@ -38,7 +38,6 @@
 #include "build.h"
 #include "a.h"
 #include "osd.h"
-#include "mmulti.h"
 
 // undefine to restrict windowed resolutions to conventional sizes
 #define ANY_WINDOWED_SIZE
@@ -58,7 +57,6 @@ static BOOL window_class_registered = FALSE;
 static HANDLE instanceflag = NULL;
 
 int32_t    backgroundidle = 1;
-int32_t	   is_vista = 0;
 
 static WORD sysgamma[3][256];
 extern int32_t curbrightness, gammabrightness;
@@ -77,7 +75,7 @@ static const char * GetDInputError(HRESULT code);
 static void ShowErrorBox(const char *m);
 static void ShowDDrawErrorBox(const char *m, HRESULT r);
 static void ShowDInputErrorBox(const char *m, HRESULT r);
-static BOOL CheckWinVersion(void);
+static inline BOOL CheckWinVersion(void);
 static LRESULT CALLBACK WndProcCallback(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 static BOOL InitDirectDraw(void);
 static void UninitDirectDraw(void);
@@ -134,6 +132,9 @@ int32_t remapinit=0;
 static char key_names[256][24];
 static uint32_t lastKeyDown = 0;
 static uint32_t lastKeyTime = 0;
+
+static OSVERSIONINFOEX osv;
+extern int32_t largepagesavailable;
 
 void (*keypresscallback)(int32_t,int32_t) = 0;
 void (*mousepresscallback)(int32_t,int32_t) = 0;
@@ -280,12 +281,39 @@ int32_t WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, in
 
     hInstance = hInst;
 
-    if (CheckWinVersion() || hPrevInst)
+    if (!CheckWinVersion() || hPrevInst)
     {
-        MessageBox(0, "This application must be run under Windows 95/98/Me or Windows 2000/XP or better.",
+        MessageBox(0, "This application requires Windows 2000 or better to run.",
                    apptitle, MB_OK|MB_ICONSTOP);
         return -1;
     }
+
+    /* Attempt to enable SeLockMemoryPrivilege, 2003/Vista/7 only */
+    if (Bgetenv("BUILD_NOLARGEPAGES") == NULL &&
+            (osv.dwMajorVersion == 6 || (osv.dwMajorVersion == 5 && osv.dwMinorVersion == 2)))
+    {
+        HANDLE token;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &token))
+        {
+            TOKEN_PRIVILEGES privs;
+            privs.PrivilegeCount = 1;
+            if (LookupPrivilegeValue(NULL, SE_LOCK_MEMORY_NAME, &privs.Privileges[0].Luid))
+            {
+                privs.Privileges[0].Attributes=SE_PRIVILEGE_ENABLED;
+
+                if (!AdjustTokenPrivileges(token, FALSE, &privs, 0, NULL, NULL) || GetLastError() != S_OK)
+                {
+                    // failure...
+                    largepagesavailable = 0;
+                }
+            }
+            CloseHandle(token);
+        }
+    }
+
+    nedcreatepool(SYSTEM_POOL_SIZE, -1);
+
+//    atexit(neddestroysyspool);
 
     hdc = GetDC(NULL);
     r = GetDeviceCaps(hdc, BITSPIXEL);
@@ -298,7 +326,7 @@ int32_t WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, in
     }
 
     // carve up the commandline into more recognizable pieces
-    argvbuf = strdup(GetCommandLine());
+    argvbuf = Bstrdup(GetCommandLine());
     _buildargc = 0;
     if (argvbuf)
     {
@@ -360,7 +388,7 @@ int32_t WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, in
         }
         *wp = 0;
 
-        _buildargv = (const char**)malloc(sizeof(char*)*_buildargc);
+        _buildargv = (const char**)Bmalloc(sizeof(char*)*_buildargc);
         wp = argvbuf;
         for (i=0; i<_buildargc; i++,wp++)
         {
@@ -418,7 +446,7 @@ int32_t WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, in
     startwin_close();
     if (instanceflag) CloseHandle(instanceflag);
 
-    if (argvbuf) free(argvbuf);
+    if (argvbuf) Bfree(argvbuf);
 
     return r;
 }
@@ -467,13 +495,7 @@ static int32_t set_windowpos(const osdfuncparm_t *parm)
 
 static void print_os_version(void)
 {
-    OSVERSIONINFO osv;
-    const char *ver = NULL;
-    // I was going to call this 'windows_9x_is_awful', but I couldn't justify ever setting it to 0
-    int32_t awful_windows_9x = 0;
-
-    osv.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-    GetVersionEx(&osv);
+    const char *ver = "";
 
     switch (osv.dwPlatformId)
     {
@@ -489,7 +511,7 @@ static void print_os_version(void)
                 ver = "XP";
                 break;
             case 2:
-                ver = "Server 2003";
+                ver = osv.wProductType == VER_NT_WORKSTATION ? "XP x64" : "Server 2003";
                 break;
             }
             break;
@@ -497,14 +519,13 @@ static void print_os_version(void)
 
         if (osv.dwMajorVersion == 6)
         {
-            is_vista = 1;
             switch (osv.dwMinorVersion)
             {
             case 0:
-                ver = "Vista";
+                ver = osv.wProductType == VER_NT_WORKSTATION ? "Vista" : "Server 2008";
                 break;
             case 1:
-                ver = "7";
+                ver = osv.wProductType == VER_NT_WORKSTATION ? "7" : "Server 2008 R2";
                 break;
             }
             break;
@@ -512,27 +533,20 @@ static void print_os_version(void)
         break;
 
     case VER_PLATFORM_WIN32_WINDOWS:
-        awful_windows_9x = 1;
         if (osv.dwMinorVersion < 10)
             ver = "95";
         else if (osv.dwMinorVersion < 90)
             ver = "98";
         else ver = "Me";
         break;
-
-    default:
-        ver = "Unknown";
-        initprintf("OS: Unknown OS\n");
-        return;
     }
 
-    if (ver != NULL)
-    {
-        initprintf("OS: Windows %s (%lu.%lu.%lu) %s\n", ver, osv.dwMajorVersion, osv.dwMinorVersion,
-                   awful_windows_9x?osv.dwBuildNumber&0xffff:osv.dwBuildNumber,osv.szCSDVersion);
-//        if (osv.szCSDVersion[0])
-        //          initprintf("  - %s\n", osv.szCSDVersion);
-    }
+    initprintf("OS: Windows %s (%lu.%lu.%lu) %s\n", ver, osv.dwMajorVersion, osv.dwMinorVersion,
+               osv.dwPlatformId == VER_PLATFORM_WIN32_NT ? osv.dwBuildNumber : osv.dwBuildNumber&0xffff,
+               osv.szCSDVersion);
+
+    if (largepagesavailable)
+        initprintf("Large page support available\n");
 }
 
 
@@ -567,7 +581,7 @@ int32_t initsystem(void)
 #if defined(USE_OPENGL) && defined(POLYMOST)
     if (loadgldriver(getenv("BUILD_GLDRV")))
     {
-        initprintf("Failed loading OpenGL driver. GL modes will be unavailable.\n");
+        initprintf("Failure loading OpenGL. GL modes are unavailable.\n");
         nogl = 1;
     }
 #endif
@@ -610,7 +624,6 @@ void initprintf(const char *f, ...)
     va_list va;
     char buf[1024];
     static char dabuf[1024];
-    static int32_t cnt = 0;
 
     va_start(va, f);
     Bvsnprintf(buf, 1024, f, va);
@@ -618,7 +631,7 @@ void initprintf(const char *f, ...)
 
     OSD_Printf(buf);
 
-    if (Bstrlen(dabuf) + Bstrlen(buf) > 1022)
+    if ((Bstrlen(dabuf) + Bstrlen(buf) + 2) > sizeof(dabuf))
     {
         startwin_puts(dabuf);
         Bmemset(dabuf, 0, sizeof(dabuf));
@@ -626,7 +639,7 @@ void initprintf(const char *f, ...)
 
     Bstrcat(dabuf,buf);
 
-    if (++cnt < 16 || flushlogwindow || Bstrlen(dabuf) > 768 || numplayers > 1)
+    if (flushlogwindow || Bstrlen(dabuf) > 768)
     {
         startwin_puts(dabuf);
         handleevents();
@@ -690,9 +703,13 @@ int32_t handleevents(void)
 
 inline void idle(void)
 {
-    Sleep(1);
+    Sleep(20);
 }
 
+inline void idle_waitevent(void)
+{
+    Sleep(20);
+}
 
 
 //-------------------------------------------------------------------------------------------------
@@ -708,7 +725,7 @@ static HMODULE               hDInputDLL    = NULL;
 static LPDIRECTINPUT7A        lpDI          = NULL;
 static LPDIRECTINPUTDEVICE7A lpDID[NUM_INPUTS] =  { NULL, NULL, NULL };
 static BOOL                  bDInputInited = FALSE;
-#define INPUT_BUFFER_SIZE	32
+#define INPUT_BUFFER_SIZE	256
 static GUID                  guidDevs[NUM_INPUTS];
 
 static char devacquired[NUM_INPUTS] = { 0,0,0 };
@@ -771,13 +788,16 @@ static struct _joydevicedefn *thisjoydef = NULL, joyfeatures[] =
 #undef featurecount
 
 // I don't see any pressing need to store the key-up events yet
-#define SetKey(key,state) { \
-        keystatus[remap[key]] = state; \
-		if (state) { \
-        keyfifo[keyfifoend] = remap[key]; \
-	keyfifo[(keyfifoend+1)&(KEYFIFOSIZ-1)] = state; \
-	keyfifoend = ((keyfifoend+2)&(KEYFIFOSIZ-1)); \
-		} \
+static inline void SetKey(int32_t key, int32_t state)
+{
+    keystatus[remap[key]] = state;
+
+    if (state) 
+    {
+        keyfifo[keyfifoend] = remap[key];
+        keyfifo[(keyfifoend+1)&(KEYFIFOSIZ-1)] = state;
+        keyfifoend = ((keyfifoend+2)&(KEYFIFOSIZ-1));
+    }
 }
 
 char map_dik_code(int32_t scanCode)
@@ -806,12 +826,15 @@ int32_t initinput(void)
     joyisgamepad=0, joynumaxes=0, joynumbuttons=0, joynumhats=0;
 
     {
-        TCHAR layoutname[KL_NAMELENGTH];
-//        GetKeyboardLayoutName(layoutname);
-//        initprintf("    * Keyboard layout: %s\n",layoutname);
-        LoadKeyboardLayout("00000409", KLF_ACTIVATE|KLF_SETFORPROCESS|KLF_SUBSTITUTE_OK);
+        char layoutname[KL_NAMELENGTH];
         GetKeyboardLayoutName(layoutname);
-        initprintf("Using keyboard layout %s\n",layoutname);
+        if (Bstrcmp(layoutname, "00000409"))
+        {
+            initprintf("Switching kb layout from %s ",layoutname);
+            LoadKeyboardLayout("00000409", KLF_ACTIVATE|KLF_SETFORPROCESS|KLF_SUBSTITUTE_OK);
+            GetKeyboardLayoutName(layoutname);
+            initprintf("to %s\n",layoutname);
+        }
     }
 
     if (InitDirectInput())
@@ -863,134 +886,6 @@ void setkeypresscallback(void (*callback)(int32_t, int32_t)) { keypresscallback 
 void setmousepresscallback(void (*callback)(int32_t, int32_t)) { mousepresscallback = callback; }
 void setjoypresscallback(void (*callback)(int32_t, int32_t)) { joypresscallback = callback; }
 
-
-DWORD WINAPI ProcessMouse(LPVOID lpThreadParameter)
-{
-    UNREFERENCED_PARAMETER(lpThreadParameter);
-    while (moustat && lpDID[MOUSE])
-    {
-        if (!appactive)
-        {
-            Sleep(100);
-            continue;
-        }
-        if ((WaitForSingleObject(inputevt[MOUSE], INFINITE)) != WAIT_OBJECT_0)
-            continue;
-        {
-            /*DWORD i;*/
-            uint32_t t;
-            int32_t result;
-            DIDEVICEOBJECTDATA didod;
-            DWORD dwElements = 1;
-
-            do
-            {
-                if (!mousegrab)
-                    break;
-
-                t = getticks();
-                result = IDirectInputDevice7_GetDeviceData(lpDID[MOUSE], sizeof(DIDEVICEOBJECTDATA),
-                         (LPDIDEVICEOBJECTDATA)&didod, &dwElements, 0);
-
-                if (!dwElements || result != DI_OK)
-                    break;
-                //        else if (result == DI_OK)
-                {
-                    // process the mouse events
-                    //  			  mousex=0;
-                    //  			  mousey=0;
-                    //            for (i=0; i<dwElements; i++)
-                    {
-                        if (didod.dwOfs == DIMOFS_X)
-                            mousex += (int16_t)didod.dwData;
-                        else if (didod.dwOfs == DIMOFS_Y)
-                            mousey += (int16_t)didod.dwData;
-                        else if (didod.dwOfs == DIMOFS_Z)
-                        {
-                            if ((int32_t)didod.dwData > 0)   	// wheel up
-                            {
-                                if (mousewheel[0] > 0 && mousepresscallback) mousepresscallback(5,0);
-                                mousewheel[0] = t;
-                                mouseb |= 16; if (mousepresscallback) mousepresscallback(5, 1);
-                            }
-                            else if ((int32_t)didod.dwData < 0)  	// wheel down
-                            {
-                                if (mousewheel[1] > 0 && mousepresscallback) mousepresscallback(6,0);
-                                mousewheel[1] = t;
-                                mouseb |= 32; if (mousepresscallback) mousepresscallback(6, 1);
-                            }
-                        }
-                        else if (didod.dwOfs >= DIMOFS_BUTTON0 && didod.dwOfs <= DIMOFS_BUTTON7)
-                        {
-                            if (didod.dwOfs == DIMOFS_BUTTON0)
-                            {
-                                if (didod.dwData & 0x80) mouseb |= 1;
-                                else mouseb &= ~1;
-                                if (mousepresscallback)
-                                    mousepresscallback(1, (mouseb&1)==1);
-                            }
-                            else if (didod.dwOfs == DIMOFS_BUTTON1)
-                            {
-                                if (didod.dwData & 0x80) mouseb |= 2;
-                                else mouseb &= ~2;
-                                if (mousepresscallback)
-                                    mousepresscallback(2, (mouseb&2)==2);
-                            }
-                            else if (didod.dwOfs == DIMOFS_BUTTON2)
-                            {
-                                if (didod.dwData & 0x80) mouseb |= 4;
-                                else mouseb &= ~4;
-                                if (mousepresscallback)
-                                    mousepresscallback(3, (mouseb&4)==4);
-                            }
-                            else if (didod.dwOfs == DIMOFS_BUTTON3)
-                            {
-                                if (didod.dwData & 0x80) mouseb |= 8;
-                                else mouseb &= ~8;
-                                if (mousepresscallback)
-                                    mousepresscallback(4, (mouseb&8)==8);
-                            }
-                            else if (didod.dwOfs == DIMOFS_BUTTON4)
-                            {
-                                OSD_Printf("got button4\n");
-                                if (didod.dwData & 0x80) mouseb |= 64;
-                                else mouseb &= ~64;
-                                if (mousepresscallback)
-                                    mousepresscallback(7, (mouseb&64)==64);
-                            }
-                            else if (didod.dwOfs == DIMOFS_BUTTON5)
-                            {
-                                OSD_Printf("got button5\n");
-                                if (didod.dwData & 0x80) mouseb |= 128;
-                                else mouseb &= ~128;
-                                if (mousepresscallback)
-                                    mousepresscallback(8, (mouseb&128)==128);
-                            }
-                            else if (didod.dwOfs == DIMOFS_BUTTON6)
-                            {
-                                OSD_Printf("got button6\n");
-                                if (didod.dwData & 0x80) mouseb |= 256;
-                                else mouseb &= ~256;
-                                if (mousepresscallback)
-                                    mousepresscallback(9, (mouseb&256)==256);
-                            }
-                            else if (didod.dwOfs == DIMOFS_BUTTON7)
-                            {
-                                OSD_Printf("got button7\n");
-                                if (didod.dwData & 0x80) mouseb |= 512;
-                                else mouseb &= ~512;
-                                if (mousepresscallback)
-                                    mousepresscallback(10, (mouseb&512)==512);
-                            }
-                        }
-                    }
-                }
-            }
-            while (1);
-        }
-    }
-    return 0;
-}
 //
 // initmouse() -- init mouse input
 //
@@ -1003,25 +898,6 @@ int32_t initmouse(void)
 //    initprintf("Initializing mouse... ");
 
     moustat=1;
-    mousethread = CreateThread
-                  (
-                      NULL,
-                      0,
-                      ProcessMouse,
-                      NULL,
-                      CREATE_SUSPENDED,
-                      &threadid
-                  );
-
-    if (!mousethread)
-    {
-        initprintf("Failed to create mouse thread!\n");
-        return 0;
-    }
-
-    SetThreadPriority(mousethread, THREAD_PRIORITY_ABOVE_NORMAL);
-    ResumeThread(mousethread);
-//    initprintf("OK\n");
 
     // grab input
     grabmouse(1);
@@ -1071,8 +947,7 @@ void readmousexy(int32_t *x, int32_t *y)
     if (!moustat || !devacquired[MOUSE] || !mousegrab) { *x = *y = 0; return; }
     *x = mousex;
     *y = mousey;
-    mousex -= *x;
-    mousey -= *y;
+    mousex = mousey = 0;
 }
 
 
@@ -1235,7 +1110,7 @@ static BOOL CALLBACK InitDirectInput_enum(LPCDIDEVICEINSTANCE lpddi, LPVOID pvRe
 
     UNREFERENCED_PARAMETER(pvRef);
 
-#define COPYGUID(d,s) memcpy(&d,&s,sizeof(GUID))
+#define COPYGUID(d,s) Bmemcpy(&d,&s,sizeof(GUID))
 
     switch (lpddi->dwDevType&0xff)
     {
@@ -1281,7 +1156,8 @@ static BOOL CALLBACK InitDirectInput_enum(LPCDIDEVICEINSTANCE lpddi, LPVOID pvRe
     }
     break;
     default:
-        d = "OTHER"; break;
+//        d = "OTHER"; break;
+        return DIENUM_CONTINUE;
     }
 
     initprintf("    * %s: %s\n", d, lpddi->tszProductName);
@@ -1498,18 +1374,18 @@ static void UninitDirectInput(void)
 
     if (axisdefs)
     {
-        for (i=joynumaxes-1; i>=0; i--) if (axisdefs[i].name) free((void*)axisdefs[i].name);
-        free(axisdefs); axisdefs = NULL;
+        for (i=joynumaxes-1; i>=0; i--) if (axisdefs[i].name) Bfree((void*)axisdefs[i].name);
+        Bfree(axisdefs); axisdefs = NULL;
     }
     if (buttondefs)
     {
-        for (i=joynumbuttons-1; i>=0; i--) if (buttondefs[i].name) free((void*)buttondefs[i].name);
-        free(buttondefs); buttondefs = NULL;
+        for (i=joynumbuttons-1; i>=0; i--) if (buttondefs[i].name) Bfree((void*)buttondefs[i].name);
+        Bfree(buttondefs); buttondefs = NULL;
     }
     if (hatdefs)
     {
-        for (i=joynumhats-1; i>=0; i--) if (hatdefs[i].name) free((void*)hatdefs[i].name);
-        free(hatdefs); hatdefs = NULL;
+        for (i=joynumhats-1; i>=0; i--) if (hatdefs[i].name) Bfree((void*)hatdefs[i].name);
+        Bfree(hatdefs); hatdefs = NULL;
     }
 
     for (devn = 0; devn < NUM_INPUTS; devn++)
@@ -1579,8 +1455,7 @@ static void GetKeyNames(void)
 
 const char *getkeyname(int32_t num)
 {
-    if ((unsigned)num >= 256) return NULL;
-    return key_names[num];
+    return ((unsigned)num >= 256) ? NULL : key_names[num];
 }
 
 const char *getjoyname(int32_t what, int32_t num)
@@ -1588,17 +1463,11 @@ const char *getjoyname(int32_t what, int32_t num)
     switch (what)
     {
     case 0:	// axis
-        if ((unsigned)num > (unsigned)joynumaxes) return NULL;
-        return (char *)axisdefs[num].name;
-
+        return ((unsigned)num > (unsigned)joynumaxes) ? NULL : (char *)axisdefs[num].name;
     case 1: // button
-        if ((unsigned)num > (unsigned)joynumbuttons) return NULL;
-        return (char *)buttondefs[num].name;
-
+        return ((unsigned)num > (unsigned)joynumbuttons) ? NULL : (char *)buttondefs[num].name;
     case 2: // hat
-        if ((unsigned)num > (unsigned)joynumhats) return NULL;
-        return (char *)hatdefs[num].name;
-
+        return ((unsigned)num > (unsigned)joynumhats) ? NULL : (char *)hatdefs[num].name;
     default:
         return NULL;
     }
@@ -1679,7 +1548,7 @@ static inline void ProcessInputDevices(void)
 
     for (t = 0; t < NUM_INPUTS; t++)
     {
-        if (*devicedef[t].did&&t!=MOUSE)
+        if (*devicedef[t].did)
         {
             result = IDirectInputDevice7_Poll(*devicedef[t].did);
             if (result == DIERR_INPUTLOST || result == DIERR_NOTACQUIRED)
@@ -1730,6 +1599,69 @@ static inline void ProcessInputDevices(void)
     {
         switch (idevnums[ev - WAIT_OBJECT_0])
         {
+        case MOUSE:
+            if (moustat)
+            {
+                dwElements = INPUT_BUFFER_SIZE;
+
+                result = IDirectInputDevice7_GetDeviceData(lpDID[MOUSE], sizeof(DIDEVICEOBJECTDATA),
+                    (LPDIDEVICEOBJECTDATA)&didod[0], &dwElements, 0);
+
+                if (!dwElements || (result != DI_OK && result != DI_BUFFEROVERFLOW))
+                    break;
+
+                do
+                {
+                    int32_t bit = 1<<(didod[dwElements-1].dwOfs - DIMOFS_BUTTON0);
+
+                    switch (didod[dwElements-1].dwOfs)
+                    {
+                    case DIMOFS_X:
+                        mousex += (int16_t)didod[dwElements-1].dwData;
+                        break;
+                    case DIMOFS_Y:
+                        mousey += (int16_t)didod[dwElements-1].dwData;
+                        break;
+                    case DIMOFS_Z:
+                        {
+                            if ((int32_t)didod[dwElements-1].dwData > 0)   	// wheel up
+                            {
+                                if (mousewheel[0] > 0 && mousepresscallback) mousepresscallback(5,0);
+                                mousewheel[0] = getticks();
+                                mouseb |= 16;
+                                if (mousepresscallback) mousepresscallback(5, 1);
+                            }
+                            else if ((int32_t)didod[dwElements-1].dwData < 0)  	// wheel down
+                            {
+                                if (mousewheel[1] > 0 && mousepresscallback) mousepresscallback(6,0);
+                                mousewheel[1] = getticks();
+                                mouseb |= 32;
+                                if (mousepresscallback) mousepresscallback(6, 1);
+                            }
+                        }
+                        break;
+
+                    case DIMOFS_BUTTON4:
+                    case DIMOFS_BUTTON5:
+                    case DIMOFS_BUTTON6:
+                    case DIMOFS_BUTTON7:
+                        didod[dwElements-1].dwOfs += 2; // skip mousewheel buttons
+                        bit = 1<<(didod[dwElements-1].dwOfs - DIMOFS_BUTTON0);
+                    case DIMOFS_BUTTON0:
+                    case DIMOFS_BUTTON1:
+                    case DIMOFS_BUTTON2:
+                    case DIMOFS_BUTTON3:
+                        if (didod[dwElements-1].dwData & 0x80) mouseb |= bit;
+                        else mouseb &= ~bit;
+                        if (mousepresscallback)
+                            mousepresscallback(didod[dwElements-1].dwOfs - DIMOFS_BUTTON0 + 1, mouseb & bit);
+                        break;
+                    }
+                }
+                while (--dwElements);
+            }
+            break;
+
         case KEYBOARD:		// keyboard
             if (!lpDID[KEYBOARD]) break;
             result = IDirectInputDevice7_GetDeviceData(lpDID[KEYBOARD], sizeof(DIDEVICEOBJECTDATA),
@@ -1942,7 +1874,7 @@ static const char * GetDInputError(HRESULT code)
 //  TIMER
 //=================================================================================================
 
-static int64 timerfreq=0;
+static int64_t timerfreq=0;
 static int32_t timerlastsample=0;
 int32_t timerticspersec=0;
 static void (*usertimercallback)(void) = NULL;
@@ -1968,7 +1900,7 @@ void (*installusertimercallback(void (*callback)(void)))(void)
 //
 int32_t inittimer(int32_t tickspersecond)
 {
-    int64 t;
+    int64_t t;
 
     if (timerfreq) return 0;	// already installed
 
@@ -2008,7 +1940,7 @@ void uninittimer(void)
 //
 inline void sampletimer(void)
 {
-    int64 i;
+    int64_t i;
     int32_t n;
 
     if (!timerfreq) return;
@@ -2030,7 +1962,7 @@ inline void sampletimer(void)
 //
 uint32_t getticks(void)
 {
-    int64 i;
+    int64_t i;
     if (timerfreq == 0) return 0;
     QueryPerformanceCounter((LARGE_INTEGER*)&i);
     return (uint32_t)(i*longlong(1000)/timerfreq);
@@ -2051,6 +1983,11 @@ int32_t gettimerfreq(void)
 //-------------------------------------------------------------------------------------------------
 //  VIDEO
 //=================================================================================================
+
+// DWM stuff
+static HMODULE              hDWMApiDLL        = NULL;
+static BOOL                 bDWMApiInited     = FALSE;
+HRESULT(WINAPI *aDwmEnableComposition)(UINT);
 
 // DirectDraw objects
 static HMODULE              hDDrawDLL      = NULL;
@@ -2103,6 +2040,28 @@ static char system_colours_saved = 0, bw_colours_set = 0;
 
 static int32_t setgammaramp(WORD gt[3][256]);
 static int32_t getgammaramp(WORD gt[3][256]);
+
+static void ToggleDesktopComposition(BOOL compEnable)
+{
+    if (!bDWMApiInited)
+    {
+        hDWMApiDLL = LoadLibrary("DWMAPI.DLL");
+        if (hDWMApiDLL)
+        {
+            aDwmEnableComposition = (void *)GetProcAddress(hDWMApiDLL, "DwmEnableComposition");
+        }
+        bDWMApiInited = TRUE;
+    }
+
+    if (aDwmEnableComposition)
+    {
+        aDwmEnableComposition(compEnable);
+        if (!silentvideomodeswitch)
+        {
+            initprintf("%s desktop composition.\n", (compEnable) ? "Enabling" : "Disabling");
+        }
+    }
+}
 
 //
 // checkvideomode() -- makes sure the video mode passed is legal
@@ -2200,6 +2159,8 @@ int32_t setvideomode(int32_t x, int32_t y, int32_t c, int32_t fs)
         setgammaramp(sysgamma);
         gammabrightness = 0;
     }
+
+    ToggleDesktopComposition(c < 16);
 
     if (!silentvideomodeswitch)
         initprintf("Setting video mode %dx%d (%d-bit %s)\n",
@@ -2641,7 +2602,7 @@ int32_t setpalette(int32_t start, int32_t num)
             }
 
             SetDIBColorTable(hDCSection, start, num, rgb);
-            free(rgb);
+            Bfree(rgb);
         }
 
         if (desktopbpp > 8) return 0;	// only if an 8bit desktop do we do what follows
@@ -3019,7 +2980,7 @@ static void ReleaseDirectDrawSurfaces(void)
     if (lpOffscreen)
     {
 //        initprintf("  - Freeing offscreen buffer\n");
-        free(lpOffscreen);
+        Bfree(lpOffscreen);
         lpOffscreen = NULL;
     }
 }
@@ -3064,7 +3025,7 @@ static int32_t SetupDirectDraw(int32_t width, int32_t height)
     }
 
 //    initprintf("  - Allocating offscreen buffer\n");
-    lpOffscreen = (char *)malloc((width|1)*height);
+    lpOffscreen = (char *)Bmalloc((width|1)*height);
     if (!lpOffscreen)
     {
         ShowErrorBox("Failure allocating offscreen buffer");
@@ -3367,33 +3328,59 @@ static int32_t SetupOpenGL(int32_t width, int32_t height, int32_t bitspp)
         glinfo.extensions = (char *)bglGetString(GL_EXTENSIONS);
 
         // GL driver blacklist
-        if (!forcegl)
-        {
-            if (!Bstrcmp(glinfo.vendor,"Microsoft Corporation")) err = 1;
-            else if (!Bstrcmp(glinfo.vendor,"SiS")) err = 1;
-            else if (!Bstrcmp(glinfo.vendor,"3Dfx Interactive Inc.")) err = 1;
-            else if (!Bstrcmp(glinfo.vendor,"Intel"))
-            {
-                if (!Bstrcmp(glinfo.renderer,"Intel 865G"))
-                    err = 0;
-                else if (!Bstrcmp(glinfo.renderer,"Intel 945GM"))
-                    err = 0;
-                else if (!Bstrcmp(glinfo.renderer,"Intel 965/963 Graphics Media Accelerator"))
-                    err = 0;
-                else err = 1;
-            }
 
-            if (err)
+        if (!Bstrcmp(glinfo.vendor,"Microsoft Corporation")) err = 1;
+        else if (!Bstrcmp(glinfo.vendor,"SiS")) err = 1;
+        else if (!Bstrcmp(glinfo.vendor,"3Dfx Interactive Inc.")) err = 1;
+        else if (!Bstrcmp(glinfo.vendor,"Intel"))
+        {
+            if (!Bstrncmp(glinfo.renderer,"Intel 8", 7)) // 845G and 865G confirmed to work
+                err = 0;
+            else if (!Bstrncmp(glinfo.renderer,"Intel 9", 7)) // 915G, 945GM, 965/963 GMA confirmed to work
+                err = 0;
+            else if (!Bstrcmp(glinfo.renderer,"Intel Cantiga"))
+                err = 0;
+            else if (!Bstrcmp(glinfo.renderer,"Mobile Intel(R) 4 Series Express Chipset Family"))
+                err = 0;
+            else err = 1;
+        }
+        else
+        {
+            if (!Bstrcmp(glinfo.vendor,"ATI Technologies Inc."))
             {
-                OSD_Printf("Unsupported OpenGL driver detected. GL modes will be unavailable. Use -forcegl to override.\n");
-                wm_msgbox("Unsupported OpenGL driver", "Unsupported OpenGL driver detected.  GL modes will be unavailable.");
-                ReleaseOpenGL();
-                unloadgldriver();
-                nogl = 1;
-                modeschecked = 0;
-                getvalidmodes();
-                return TRUE;
+#ifdef POLYMER
+                pr_ati_fboworkaround = 1;
+                initprintf("Enabling ATI FBO color attachment workaround.\n");
+#endif
+                if (!Bstrncmp(glinfo.renderer,"Radeon X1", 9))
+                {
+                    r_vbos = 0;
+#ifdef POLYMER
+                    pr_ati_nodepthoffset = 1;
+                    initprintf("Enabling ATI R520 polygon offset workaround.\n");
+#endif
+                }
+#ifdef POLYMER
+                else
+                    pr_ati_nodepthoffset = 0;
+#endif
             }
+#ifdef POLYMER
+            else
+                pr_ati_fboworkaround = 0;
+#endif
+        }
+
+        if (!forcegl && err)
+        {
+            OSD_Printf("Unsupported OpenGL driver detected. GL modes will be unavailable. Use -forcegl to override.\n");
+            wm_msgbox("Unsupported OpenGL driver", "Unsupported OpenGL driver detected.  GL modes will be unavailable.");
+            ReleaseOpenGL();
+            unloadgldriver();
+            nogl = 1;
+            modeschecked = 0;
+            getvalidmodes();
+            return TRUE;
         }
 
         glinfo.maxanisotropy = 1.0;
@@ -3478,6 +3465,14 @@ static int32_t SetupOpenGL(int32_t width, int32_t height, int32_t bitspp)
             else if (!Bstrcmp((char *)p2, "GL_EXT_gpu_shader4"))
             {
                 glinfo.sm4 = 1;
+            }
+            else if (!Bstrcmp((char *)p2, "GL_ARB_occlusion_query"))
+            {
+                glinfo.occlusionqueries = 1;
+            }
+            else if (!Bstrcmp((char *)p2, "GL_ARB_shader_objects"))
+            {
+                glinfo.glsl = 1;
             }
         }
         Bfree(p);
@@ -4113,23 +4108,21 @@ static void ShowErrorBox(const char *m)
 //
 // CheckWinVersion() -- check to see what version of Windows we happen to be running under
 //
-static BOOL CheckWinVersion(void)
+static inline BOOL CheckWinVersion(void)
 {
-    OSVERSIONINFO osv;
-
     ZeroMemory(&osv, sizeof(osv));
-    osv.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-    if (!GetVersionEx(&osv)) return TRUE;
+    osv.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
 
-    // haha, yeah, like it will work on Win32s
-    if (osv.dwPlatformId == VER_PLATFORM_WIN32s) return TRUE;
+    // we don't like anything older than Windows 2000, but the BUILD_WIN9X
+    // variable allows attempting to run on 9x (for masochists and sodomites)
 
-    // we don't like NT 3.51
-    if (osv.dwMajorVersion < 4) return TRUE;
+    if (!GetVersionEx((LPOSVERSIONINFOA)&osv)) return FALSE;
 
-    // nor do we like NT 4
-    if (osv.dwPlatformId == VER_PLATFORM_WIN32_NT &&
-            osv.dwMajorVersion == 4) return TRUE;
+    if (osv.dwMajorVersion >= 5) return TRUE;
+
+    if (Bgetenv("BUILD_WIN9X") != NULL && osv.dwMajorVersion == 4 &&
+             osv.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS)
+        return TRUE;
 
     return FALSE;
 }
@@ -4312,7 +4305,7 @@ static LRESULT CALLBACK WndProcCallback(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     case WM_CHAR:
         if (((keyasciififoend+1)&(KEYFIFOSIZ-1)) == keyasciififoplc) return 0;
         if ((keyasciififoend - keyasciififoplc) > 0) return 0;
-        if (Btolower(scantoasc[OSD_OSDKey()]) == Btolower((uint8_t)wParam)) return 0;
+        if ((OSD_OSDKey() < 128) && (Btolower(scantoasc[OSD_OSDKey()]) == Btolower((uint8_t)wParam))) return 0;
         if (!OSD_HandleChar((uint8_t)wParam)) return 0;
         keyasciififo[keyasciififoend] = (uint8_t)wParam;
         keyasciififoend = ((keyasciififoend+1)&(KEYFIFOSIZ-1));

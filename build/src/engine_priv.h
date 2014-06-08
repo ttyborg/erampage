@@ -32,6 +32,7 @@ extern int32_t globalorientation;
 extern int16_t searchit;
 extern int32_t searchx, searchy;
 extern int16_t searchsector, searchwall, searchstat;
+extern int16_t searchbottomwall;
 
 extern char inpreparemirror;
 
@@ -60,24 +61,7 @@ int32_t animateoffs(int16_t tilenum, int16_t fakevar);
 extern int32_t indrawroomsandmasks;
 
 
-#if defined(__WATCOMC__) && !defined(NOASM)
-
-#pragma aux setgotpic =\
-"mov ebx, eax",\
-"cmp byte ptr walock[eax], 200",\
-"jae skipit",\
-"mov byte ptr walock[eax], 199",\
-"skipit: shr eax, 3",\
-"and ebx, 7",\
-"mov dl, byte ptr gotpic[eax]",\
-"mov bl, byte ptr pow2char[ebx]",\
-"or dl, bl",\
-"mov byte ptr gotpic[eax], dl",\
-parm [eax]\
-modify exact [eax ebx ecx edx]
-void setgotpic(int32_t);
-
-#elif defined(_MSC_VER) && !defined(NOASM)	// __WATCOMC__
+#if defined(_MSC_VER) && !defined(NOASM)
 
 static inline void setgotpic(int32_t a)
 {

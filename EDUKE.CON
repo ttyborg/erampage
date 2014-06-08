@@ -1,0 +1,1510 @@
+/*
+todo:
+
+1. 
+2.
+3. 
+4. 
+5. jaildoor bug :(
+6. bike/boat accelerate/brake/jump code
+7. 
+8. fix switch 98-101 positioning bug
+9. make keys multiplayer-compatible
+10. fix endgame switch
+11. fix lotsofglass !!!
+12. make feathers animation
+13. fix items (beer, cow pie etc)
+14.
+15. atomic health goo cluster !!!
+16. make eating/drinking system
+17. sky parallaxing
+18. stop flying in original huntin
+
+====================================================================
+ keyword         | built-in | state |  description
+====================================================================
+ifonmoto			YES?		N/A		activated if player is on moto
+ifonboat			YES?		N/A		activated if player is on boat
+ifmotofast			NO			N/A		???
+ifhittruck			NO			N/A		???
+iftipcow			NO			N/A		???
+ifsoundid #			NO			N/A		???
+ifsounddist 0/1		NO			N/A		???
+ifactorhealthl n	??			N/A		activated if actor has less than n health
+ifcoop				NO			N/A		???
+ifonmud				NO			N/A		???
+ifsizedown			NO			N/A		???
+iffindnewspot		NO			N/A		???
+ifpupwind			NO			N/A		???
+ifactorhealthg n	??			N/A		activated if actor has more than n health
+
+feathers n			NO			N/A		spawn n feathers particules
+iseat n				NO			N/A		???
+newpic #			NO			N/A		???
+
+slapplayer			NO			NO		???
+smackbubba			YES			YES		end-of-level action
+straferight			NO			NO		???
+strafeleft			NO			NO		???
+motoloopsnd			YES			YES		play sound
+garybanjo			YES			YES		play sound
+soundtagonce		NO			NO		???
+fakebubba			NO			NO		???
+tearitup			NO			NO		???
+larrybird			YES			YES		rise up in the air by tornado
+mamaquake			??			YES		shake the ground
+mamaspawn			??			YES		???
+mamatrigger			??			YES		???
+mamaend				??			YES		end-of-game action
+smacksprite			??			NO		???
+destroyit			??			NO		???
+leavedroppings		??			NO		???
+leavetrax			??			NO		???
+deploybias			??			NO		???
+rndmove				??			NO		???
+*/
+
+
+cheatkeys 19 32
+
+gamevar temp 0 2
+gamevar tmp1 0 2
+gamevar tmp2 0 2
+gamevar FLOORPICNUM 0 1
+gamevar CEILPICNUM 0 1
+gamevar CURRWEAPON 0 1
+gamevar KICKBACKPIC 0 1
+gamevar BOOTAMNT 0 1
+gamevar LPISSTIME 0 1
+gamevar HOLSTER 0 1
+gamevar LOTAG 0 2
+gamevar OWNER 0 2
+gamevar PAL 0 2
+gamevar WEAPON7_FLAGS 0 0
+gamevar WEAPON7_SHOTSPERBURST 5 0
+gamevar WEAPON9_TOTALTIME 12 0
+gamevar WEAPON9_FLAGS 65548 0
+gamevar WEAPON9_SHOOTS RIFLE 0
+gamevar WEAPON9_SHOTSPERBURST 2 0 
+gamevar WEAPON9_FIRESOUND AK3 0
+gamevar PIPEBOMB_CONTROL 255 2
+gamevar GRENADE_LIFETIME 30 1
+gamevar GRENADE_LIFETIME_VAR 2 1
+
+define NEWLIGHTNIN 12
+define TOILET 2121
+define CACTUS2 2443
+define CACTUS_EFFECT 2452
+define E1L2SAW 3410
+define UFOM 5260
+define ALARMBELL1 8660
+define ALARMBELL2 8661
+define COWPIE5 8901
+define COWPIE4 8903
+define COWPIE3 8905
+define COWPIE2 8907
+define COWPIE1 8909
+define BEER5 8911
+define BEER4 8913
+define BEER3 8915
+define BEER2 8917
+define BEER1 8919
+define MOONSHINE1 8921
+
+
+defineprojectile DILDO PROJ_WORKSLIKE 2
+defineprojectile DILDO PROJ_HITRADIUS 0
+defineprojectile DILDO PROJ_VEL 900
+
+defineprojectile SHITBALL PROJ_WORKSLIKE 6402
+defineprojectile SHITBALL PROJ_HITRADIUS 0
+
+defineprojectile CHEERBLADE PROJ_WORKSLIKE 6
+defineprojectile CHEERBLADE PROJ_HITRADIUS 0
+defineprojectile CHEERBLADE PROJ_VEL 700
+defineprojectile CHEERBLADE PROJ_BOUNCES 3
+
+defineprojectile CHEERBOMB PROJ_WORKSLIKE 2050
+defineprojectile CHEERBOMB PROJ_SPAWNS EXPLOSION2
+defineprojectile CHEERBOMB PROJ_DROP -100
+defineprojectile CHEERBOMB PROJ_HITRADIUS 1536
+defineprojectile CHEERBOMB PROJ_VEL 1000
+defineprojectile CHEERBOMB PROJ_ISOUND DYNEW
+
+defineprojectile OWHIP PROJ_WORKSLIKE 2
+defineprojectile OWHIP PROJ_HITRADIUS 0
+defineprojectile OWHIP PROJ_VEL 600
+
+defineprojectile UWHIP PROJ_WORKSLIKE 2
+defineprojectile UWHIP PROJ_HITRADIUS 0
+defineprojectile UWHIP PROJ_VEL 700
+
+
+define LADDERSTEP                     161
+definesound LADDERSTEP             ladder.wav     -128 128 240 0    0
+define LADDER 3587    
+
+actor LADDER 0 0
+  ifpdistl 640 {                // approach the ladder
+    // ifangdiffl 526 { } else {  // face the ladder, doesn't work in RR
+      // tip                      // grab the ladder, holster weapon
+      ifcount 6 {
+        ifhitspace {            // climb with space
+          soundonce LADDERSTEP
+          cstat 32768
+          cstator 1
+          cstator 32
+        } else ifp pducking {   // get down by ducking
+          soundonce LADDERSTEP
+          cstat 32768
+          cstator 32
+        }
+      }
+      ifp pfalling {            // grab the ladder when falling
+        soundonce LADDERSTEP
+        cstat 32768
+        cstator 1
+        cstator 32
+      }
+    // }
+  } else {                      // too far to grab the ladder
+    cstat 32768
+    cstator 32
+    resetcount
+  }
+enda
+
+//onevent EVENT_ENTERLEVEL
+//spriteflags WACOWINDER 1 // fix WACOWINDER shadow
+//endevent
+
+gamevar sect 0 2
+onevent EVENT_GAME
+	getactor[THISACTOR].picnum temp
+	ifvare temp 1 {
+		getactor[THISACTOR].lotag temp
+		ifvare temp 6 {
+			getactor[THISACTOR].sectnum sect
+			headspritesect temp sect
+			whilevarn temp -1 {
+				setactor[temp].htextra 140
+				setactor[temp].htpicnum RADIUSEXPLOSION
+				setactor[temp].htowner temp
+				nextspritesect temp temp
+			}
+		} else ifvare temp 15 {
+			getactor[THISACTOR].sectnum sect
+			//setactor[THISACTOR].picnum SECTOREFFECTOR
+			//setactor[THISACTOR].lotag 15
+			getsector[sect].extra temp
+			ifvare temp 300 {
+				// setsector[sect].lotag 25
+				setsector[sect].hitag 0
+				getsector[sect].wallptr temp
+				getwall[temp].nextsector sect
+				setsector[sect].lotag 0
+				setsector[sect].hitag 0
+			}
+		}
+	} else ifvare temp JAILDOOR {
+
+	} else ifvare temp 38 killit
+
+getactor[THISACTOR].lotag LOTAG
+ifvare LOTAG 1
+{ ifactor BILLYRAYSTAYPUT { killit } else
+ifactor BILLYRAY { killit } else
+ifactor COOTSTAYPUT { killit } else
+ifactor COOT { killit } else
+ifactor RABBIT { killit } else
+ifactor BIKER { killit } else
+ifactor BIKERB { killit } else
+ifactor BIKERBV2 { killit } else
+ifactor CHEER { killit } else
+ifactor CHEERB { killit } else
+ifactor CHEERBOAT { killit } else
+ifactor CHEERSTAYPUT { killit } else
+ifactor MINIONBOAT { killit } else
+ifactor HULKBOAT { killit } else
+ifactor MAKEOUT { killit } else { } } else { }
+
+
+ifactor MOSQUITO
+sizeat 14 14
+else
+ifactor HULKSTAYPUT
+sizeat 30 30
+else
+ifactor HULK
+sizeat 30 30
+else
+ifactor BUBBAELVIS
+sizeat 18 18
+else
+ifactor UFOM
+sizeat 32 32
+else
+ifactor BIKERB
+sizeat 20 20
+else
+ifactor BIKERBV2
+sizeat 20 20
+else
+ifactor CHEERB
+sizeat 20 20
+else
+ifactor CHEERBOAT
+sizeat 42 42
+else
+ifactor MAMA
+sizeat 32 32
+else
+ifactor MAMACLOUD
+sizeat 48 48
+else
+ifactor MINIONBOAT
+sizeat 42 42
+else
+ifactor HULKBOAT
+sizeat 42 42
+else
+ifactor BILLYPLAY
+sizeat 20 20
+else
+ifactor COOTPLAY
+sizeat 22 18
+
+
+endevent
+
+onevent EVENT_EGS
+ifspawnedby RESPAWN { ifactor MAMA { getactor[THISACTOR].owner OWNER getactor[OWNER].pal PAL setactor[THISACTOR].pal PAL } }
+endevent
+
+action DUMMYFRAMES 0 2 1 1 8
+
+actor NEWLIGHTNIN 0 0
+ifcansee ifpdistl 4096 ifrnd 1 ifrnd 64 {
+		ifrnd 84 globalsound THUNDER1
+		else ifrnd 128 globalsound THUNDER2
+		else globalsound THUNDER3
+		palfrom 32 32 32 34
+}
+enda
+
+
+
+actor TOILET 0 0
+getplayer[THISACTOR].last_pissed_time LPISSTIME
+getplayer[THISACTOR].holster_weapon HOLSTER
+ifvare LPISSTIME 0 { ifp palive { ifpdistl RETRIEVEDISTANCE ifhitspace { soundonce PISSLOOP setplayer[THISACTOR].last_pissed_time 5720 setplayer[THISACTOR].transporter_hold 58 setplayer[THISACTOR].holster_weapon 1 setplayer[THISACTOR].weapon_pos -1 addphealth 10 { ifvare HOLSTER 0 { soundonce PISSEND } } } } }
+enda
+
+actor CACTUS_EFFECT 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 288 { ifp palive setgamepalette 0 wackplayer killit } }
+enda
+
+actor CACTUS2 0 0
+ifspritepal 0 { ifp palive ifp prunning { ifpdistl RETRIEVEDISTANCE { ifrnd 32 { soundonce LN_PAIN8 addphealth -2 palfrom 32 32 } } } else ifp pwalking { ifpdistl RETRIEVEDISTANCE { ifrnd 32 { soundonce LN_PAIN8 addphealth -2 palfrom 32 32 } } } }
+ifspritepal 19 { ifp palive ifpdistl RETRIEVEDISTANCE { soundonce LN_PAIN8 wackplayer addphealth MAXPLAYERHEALTH setgamepalette 2 spawn CACTUS_EFFECT spritepal 25 } }
+enda
+
+actor E1L2SAW 0 0
+ifspritepal 0 { cstat 272 checkactivatormotion 999 ifvare RETURN 1 spritepal 3 ifp palive { ifpdistl RETRIEVEDISTANCE { addphealth -210 palfrom 32 32 } } }
+ifspritepal 3 { cstat 32768 checkactivatormotion 999 ifvarn RETURN 1 spritepal 0 }
+enda
+
+
+// UFO flying saucer with minion inside (MOSQUITO.CON clone).
+
+action UFOMFRAMES   0 4 1 1 8
+action UFOMSCREAM   0 4 1 1 8
+
+move UFOMRUNVELS    86  64
+move UFOMRUNUPVELS  86 -64
+move UFOMBULLVELS  186 -64
+move UFOMBACKWARDS -64 -64
+move UFOMRISE       32 -32
+move UFOMSTOPPED   -16
+
+ai AIUFOMGETE     UFOMSCREAM UFOMRUNVELS   faceplayersmart getv
+ai AIUFOMWAIT     UFOMFRAMES UFOMSTOPPED   faceplayersmart
+ai AIUFOMGETUP    UFOMSCREAM UFOMRUNUPVELS faceplayersmart getv
+ai AIUFOMPULLBACK UFOMFRAMES UFOMBACKWARDS faceplayersmart
+ai AIUFOMHIT      UFOMSCREAM UFOMBACKWARDS faceplayersmart
+ai AIUFOMDODGE    UFOMFRAMES UFOMBULLVELS  dodgebullet geth
+ai AIUFOMDODGEUP  UFOMFRAMES UFOMRISE      getv geth
+
+state UFOMdead
+  addkills 1
+  spawn EXPLOSION2
+  soundonce DYNEW
+  spawn MINION
+  killit
+ends
+
+state checkUFOMhitstate
+
+  ifdead
+    state UFOMdead
+  else ifsquished
+    state UFOMdead
+  else
+  {
+     ai AIUFOMGETE
+  }
+ends
+
+state checkUFOMnearplayer
+   ifp palive
+   {
+     ifpdistl 8192
+     {
+        ifrnd 96
+          {
+            ifcansee
+              ifcanshoottarget
+            {
+              shoot FIRELASER
+            }
+        }
+     }
+   }
+
+ends
+
+state UFOMgetstate
+  ifrnd 192
+  {
+    ifcansee
+    {
+      ifmove UFOMBULLVELS
+      {
+        ifcount 64
+          ai AIUFOMPULLBACK
+        else
+          ifnotmoving
+            ifcount 16
+              ai AIUFOMPULLBACK
+      }
+      else
+        ifcount 32
+      {
+        ifp phigher
+          move UFOMBULLVELS geth getv
+        else
+          move UFOMBULLVELS geth
+      }
+    }
+  }
+  else ifrnd 64
+     state checkUFOMnearplayer
+ends
+
+state UFOMdodgestate
+  ifai AIUFOMDODGEUP
+  {
+     ifcount 10
+       ai AIUFOMGETE
+     else
+       ifnotmoving
+         ai AIUFOMGETE
+  }
+  else
+  {
+    ifcount 10
+      ai AIUFOMGETE
+    else
+      ifnotmoving
+        ai AIUFOMGETE
+  }
+ends
+
+useractor enemy UFOM COOTSTRENGTH UFOMFRAMES
+  cstat 257
+  soundonce UFOLET
+//  state checkUFOMnearplayer
+
+  ifrnd 2
+    fall
+
+  ifaction UFOMFRAMES
+    ai AIUFOMGETE
+  else ifai AIUFOMWAIT
+  {
+    ifactioncount 4
+      ifrnd 16
+        ifcansee
+        {
+           ifrnd 8
+           ifp phigher
+              ai AIUFOMGETUP
+           else
+              ai AIUFOMGETE
+        }
+  }
+  else ifai AIUFOMGETE
+    state UFOMgetstate
+  else ifai AIUFOMGETUP
+    state UFOMgetstate
+  else ifai AIUFOMPULLBACK
+  {
+    ifcount 32
+      ai AIUFOMWAIT
+  }
+  else ifai AIUFOMHIT
+  {
+    ifcount 10
+      ai AIUFOMWAIT
+  }
+  else
+    ifai AIUFOMDODGE
+      state UFOMdodgestate
+  else
+    ifai AIUFOMDODGEUP
+      state UFOMdodgestate
+
+  ifhitweapon
+    state checkUFOMhitstate
+
+enda
+
+actor ALARMBELL1 0 0
+cstator 257
+ifhitweapon { soundonce ALARM checkactivatormotion 494 ifvarn RETURN 1 { operateactivators 494 0 cactor ALARMBELL2 } }
+enda
+
+actor COWPIE5 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound COW2 ifp palive addinventory GET_COWPIE 800 killit } }
+enda
+
+actor COWPIE4 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound COW2 ifp palive addinventory GET_COWPIE 640 killit } }
+enda
+
+actor COWPIE3 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound COW2 ifp palive addinventory GET_COWPIE 480 killit } }
+enda
+
+actor COWPIE2 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound COW2 ifp palive addinventory GET_COWPIE 320 killit } }
+enda
+
+actor COWPIE1 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound COW2 ifp palive addinventory GET_COWPIE 160 killit } }
+enda
+
+actor BEER5 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound TELEPORT ifp palive addinventory GET_BEER 1200 killit } }
+enda
+
+actor BEER4 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound TELEPORT ifp palive addinventory GET_BEER 960 killit } }
+enda
+
+actor BEER3 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound TELEPORT ifp palive addinventory GET_BEER 720 killit } }
+enda
+
+actor BEER2 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound TELEPORT ifp palive addinventory GET_BEER 480 killit } }
+enda
+
+actor BEER1 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound TELEPORT ifp palive addinventory GET_BEER 240 killit } }
+enda
+
+actor MOONSHINE1 0 DUMMYFRAMES
+ifaction DUMMYFRAMES { ifactioncount 1 { stopsound CLOCKCHM stopsound COW2 stopsound TELEPORT } ifactioncount 4 killit }
+enda
+
+define VEHICLESPEED 60000 // with boat/moto
+define WRONGWAYSPEED 40000 // with boat on ground/moto on water
+
+action EMPTYBIKEFRAMES 0 7 7 0 1
+actor EMPTYBIKE 0 EMPTYBIKEFRAMES
+  sizeat 16 16
+  cstat 1
+  fall
+  ifonwater setactor[THISACTOR].zvel 10000
+  getactor[THISACTOR].pal temp
+  ifvarn temp 0 {
+    ifmultiplayer setactor[THISACTOR].pal 0
+    else killit
+  }
+  ifmove RESPAWN_ACTOR_FLAG
+    state respawnit
+  else
+    ifp palive
+      ifpdistl RETRIEVEDISTANCE
+        ifcount 6
+          ifcanseetarget
+            ifhitspace
+            {
+              getplayer[THISACTOR].gotweapon MOTORCYCLE_WEAPON temp
+              ifvarn temp 0 break
+              getplayer[THISACTOR].gotweapon BOAT_WEAPON temp
+              ifvarn temp 0 break
+              ifgotweaponce 0 break
+              soundonce BIKESTRT
+              quote 126
+              ifspawnedby EMPTYBIKE {
+                addweapon MOTORCYCLE_WEAPON 50
+                state getweaponcode
+              } else {
+                addweapon MOTORCYCLE_WEAPON 0
+                state quikweaponget
+              }
+            }
+enda
+
+action EMPTYBOATFRAMES 0 7 7 0 1
+actor EMPTYBOAT 0 EMPTYBOATFRAMES
+  sizeat 16 16
+  cstat 1
+  getsector[THISACTOR].floorz temp
+  ifonwater addvar temp 10
+  setactor[THISACTOR].z temp
+  getactor[THISACTOR].pal temp
+  ifvarn temp 0 {
+    ifmultiplayer setactor[THISACTOR].pal 0
+    else killit
+  }
+  ifmove RESPAWN_ACTOR_FLAG
+    state respawnit
+  else
+    ifp palive
+      ifpdistl RETRIEVEDISTANCE
+        ifcount 6
+          ifcanseetarget
+            ifhitspace
+            {
+              getplayer[THISACTOR].gotweapon MOTORCYCLE_WEAPON temp
+              ifvarn temp 0 break
+              getplayer[THISACTOR].gotweapon BOAT_WEAPON temp
+              ifvarn temp 0 break
+              ifgotweaponce 0 break
+              soundonce FBOATUP
+              quote 136
+              ifspawnedby EMPTYBOAT {
+                addweapon BOAT_WEAPON 10
+                state getweaponcode
+              } else {
+                addweapon BOAT_WEAPON 0
+                state quikweaponget
+              }
+            }
+enda
+
+define CHICKEN_AMMO 14
+define MOTOAMMO 78   
+define BOATAMMO 8460
+
+actor CHICKEN_AMMO
+  fall
+  ifmove RESPAWN_ACTOR_FLAG
+    state respawnit
+  else
+    ifp palive
+      ifpdistl RETRIEVEDISTANCE
+        ifcount 6
+          ifcanseetarget
+          {
+            ifgotweaponce 0
+              break
+            addammo CHICKEN_WEAPON 5
+            quote 140
+            ifspawnedby CHICKEN_AMMO
+              state getweaponcode
+            else
+              state quikweaponget
+            }
+enda
+
+/*
+define PROJECTILE_FLAG_BULLET                      1
+define PROJECTILE_FLAG_RPG                         2
+define PROJECTILE_FLAG_BOUNCESOFFWALLS             4
+define PROJECTILE_FLAG_BOUNCESOFFMIRRORS           8
+define PROJECTILE_FLAG_KNEE                        16
+define PROJECTILE_FLAG_WATERBUBBLES                32
+define PROJECTILE_FLAG_TIMED                       64
+define PROJECTILE_FLAG_NOENEMYHITS                 128
+define PROJECTILE_FLAG_SPIT                        256
+define PROJECTILE_FLAG_COOLEXPLOSION1              512
+define PROJECTILE_FLAG_BLOOD                       1024
+define PROJECTILE_FLAG_LOSESVELOCITY               2048
+define PROJECTILE_FLAG_NOAIM                       4096
+define PROJECTILE_FLAG_RANDDECALSIZE               8192
+define PROJECTILE_FLAG_EXPLODEONTIMER              16384
+define PROJECTILE_FLAG_RPG_IMPACT                  32768
+define PROJECTILE_FLAG_RADIUS_PICNUM               65536
+define PROJECTILE_FLAG_ACCURATE_AUTOAIM            131072
+define PROJECTILE_FLAG_FORCEIMPACT                 262144
+define PROJECTILE_FLAG_REALCLIPDIST                524288
+define PROJECTILE_FLAG_ACCURATE                    1048576
+*/
+
+// create boat projectile
+define BOATSHOT         1781 // 1790
+defineprojectile BOATSHOT PROJ_WORKSLIKE 6150 //RPG BOUNCESOFFWALLS LOSESVELOCITY NOAIM
+defineprojectile BOATSHOT PROJ_SPAWNS EXPLOSION2
+defineprojectile BOATSHOT PROJ_VEL 1000
+defineprojectile BOATSHOT PROJ_EXTRA 300
+defineprojectile BOATSHOT PROJ_DROP -200
+// defineprojectile BOATSHOT PROJ_ISOUND PIPEBOMB_EXPLODE
+defineprojectile BOATSHOT PROJ_HITRADIUS 2560
+defineprojectile BOATSHOT PROJ_BOUNCES 1
+defineprojectile BOATSHOT PROJ_OFFSET 224
+defineprojectile BOATSHOT PROJ_CLIPDIST 24
+defineprojectile BOATSHOT PROJ_TRAIL SMALLSMOKE
+
+
+defineprojectile RPG2 PROJ_WORKSLIKE 4098 //RPG NOAIM
+defineprojectile RPG2 PROJ_SPAWNS EXPLOSION2
+defineprojectile RPG2 PROJ_VEL 1000
+defineprojectile RPG2 PROJ_EXTRA 300
+defineprojectile RPG2 PROJ_HITRADIUS 2560
+defineprojectile RPG2 PROJ_OFFSET 224
+defineprojectile RPG2 PROJ_CLIPDIST 24
+defineprojectile RPG2 PROJ_TRAIL FEATHERS
+
+
+/*
+  From LEONARD.CON
+  Network player
+*/
+
+state standard_pjibs
+  guts JIBS1 1
+  guts JIBS3 2
+  guts JIBS4 1
+  guts JIBS5 1
+  guts JIBS6 2
+  guts LNRDTORSO 1
+  guts LNRDGUN 1
+ends
+
+state checksquished
+  ifsquished
+  {
+    addkills 1
+    sound SQUISHED
+    state standard_jibs
+    state random_ooz
+    killit
+  }
+ends
+
+move DONTGETUP
+move SHRUNKVELS 32
+move LNRDNOTMOVING
+
+state handle_dead_LNRDs
+  fall
+  ifmove 0   // 1st time initializiation...
+  {
+    ifrnd 128
+      cstat 4
+    else
+      cstat 0
+    move LNRDNOTMOVING
+    // cstat 0   
+  }
+
+  ifsquished
+  {
+    sound SQUISHED
+    state random_ooz
+    killit
+  }
+  else
+    ifcount 1024
+      ifpdistg 4096
+        killit
+  else
+  {
+    strength 0
+    ifhitweapon
+      ifwasweapon RADIUSEXPLOSION
+    {
+      state standard_jibs
+      killit
+    }
+  }
+ends
+
+action PLYINGFRAMES 0 1 0 1 1
+actor LNRDLYINGDEAD 0 PLYINGFRAMES
+  state handle_dead_LNRDs
+enda
+
+action PSTAND         0   1   5   1    1
+action PEXPLODE     106   5   1   1   10
+action PEXPLODEAD   113   1   1
+action PJPHOUVER     15   1   5   1
+action PWALK          0   8   5   1   8
+action PRUN          40   8   5   1   10
+//  check if this is an eight
+action PWALKBACK      5   8   5  -1   8
+action PRUNBACK      45   8   5  -1   10
+action PJUMPING      50   4   5   1   30
+action PFALLING     140   3   3   1   8
+action PDUCKING     165   1   5   1   1
+action PCRAWLING    155   8   5   1   20
+action PAKICKING    120   4   5   1   25
+action PFLINTCHING  145   1   1   1   10
+action PTHROWNBACK  145   7   1   1   18
+action PLYINGDEAD   153   1   1
+
+action PSWIMMINGGO   80   1   5   1   10
+action PSWIMMING     80   3   5   1   13
+action PSWIMMINGWAIT 80   1   5   1   13
+action PTREDWATER    80   2   5   1   17
+
+move PSTOPED
+
+state lnsndpain
+  ifrnd 64
+    soundonce LN_PAIN5
+  else ifrnd 85
+    soundonce LN_PAIN6
+  else ifrnd 128
+    soundonce LN_PAIN7
+  else
+    soundonce LN_PAIN8
+ends
+
+state checksectorpicnum
+getsector[THISACTOR].floorpicnum FLOORPICNUM
+getsector[THISACTOR].ceilingpicnum CEILPICNUM
+getplayer[screenpeek].boot_amount BOOTAMNT
+setplayer[THISACTOR].runspeed 53200
+ifvare CEILPICNUM 2577 ifrnd 1 ifrnd 84 {
+		ifrnd 84 globalsound THUNDER1
+		else ifrnd 128 globalsound THUNDER2
+		else globalsound THUNDER3
+		palfrom 32 63 63 63
+} 
+
+ifvare FLOORPICNUM 3073 ifp ponground { ifvarg BOOTAMNT 0 { ifaction PSTAND { } else { ifcount 12 { subvar BOOTAMNT 1 setplayer[screenpeek].boot_amount BOOTAMNT resetcount } } } else { setplayer[THISACTOR].runspeed 35000 } }
+ifvare FLOORPICNUM 7768 { ifp ponground { ifrnd 48 { state lnsndpain addphealth -4 palfrom 32 32 } } }
+ifvare FLOORPICNUM 7820 { ifp ponground { ifrnd 48 { state lnsndpain addphealth -4 palfrom 32 32 } } }
+ifvare FLOORPICNUM 7889 ifp ponground { ifvarg BOOTAMNT 0 { ifaction PSTAND { } else { ifcount 12 { subvar BOOTAMNT 1 setplayer[screenpeek].boot_amount BOOTAMNT resetcount } } } else { setplayer[THISACTOR].runspeed 35000 } }
+ends
+
+state check_pstandard
+  ifp pwalking
+    action PWALK
+  else
+    ifp pkicking
+      action PAKICKING
+  else
+    ifp pwalkingback
+      action PWALKBACK
+  else
+    ifp prunning
+      action PRUN
+  else
+    ifp prunningback
+      action PRUNBACK
+  else
+    ifp pjumping
+      action PJUMPING
+  else
+    ifp pducking
+      action PDUCKING
+ends
+
+define BIKEIDLE     187
+define FBOATSLW     182
+
+action PLAYERONBOAT 3339 7 7 0 1 //7184 - 3845
+action PLAYERONMOTO 3368 7 7 0 1 //7213 - 3845
+
+
+actor APLAYER MAXPLAYERHEALTH PSTAND 0 0
+  sizeat 18 18
+ifp palive state checksectorpicnum
+ifp ponmoonshine { stopsound CLOCKCHM soundonce DIDDLP }
+ifpinventory GET_MOONSHINE 2 { } else { spawn MOONSHINE1 }
+ifpinventory GET_COWPIE 1600 { } else { addinventory GET_COWPIE 960 }
+ifpinventory GET_COWPIE 959 { } else { addinventory GET_COWPIE 1 stopsound COW2 addphealth 5 spawn COWPIE5 soundonce MUNCH2 quote 150 }
+ifpinventory GET_COWPIE 799 { } else { addinventory GET_COWPIE 1 stopsound COW2 addphealth 5 spawn COWPIE4 soundonce MUNCH2 quote 150 }
+ifpinventory GET_COWPIE 639 { } else { addinventory GET_COWPIE 1 stopsound COW2 addphealth 5 spawn COWPIE3 soundonce MUNCH2 quote 150 }
+ifpinventory GET_COWPIE 479 { } else { addinventory GET_COWPIE 1 stopsound COW2 addphealth 5 spawn COWPIE2 soundonce MUNCH2 quote 150 }
+ifpinventory GET_COWPIE 319 { } else { addinventory GET_COWPIE 1 stopsound COW2 addphealth 5 spawn COWPIE1 soundonce MUNCH2 quote 150 }
+ifpinventory GET_COWPIE 159 { } else { spawn MOONSHINE1 addinventory GET_COWPIE 1 stopsound COW2 addphealth 5 soundonce MUNCH2 quote 150 }
+ifpinventory GET_BEER 2400 { } else { addinventory GET_BEER 1440 }
+ifpinventory GET_BEER 1439 { } else { addinventory GET_BEER 1 stopsound TELEPORT addphealth 5 spawn BEER5 soundonce CHUG quote 151 }
+ifpinventory GET_BEER 1199 { } else { addinventory GET_BEER 1 stopsound TELEPORT addphealth 5 spawn BEER4 soundonce CHUG quote 151 }
+ifpinventory GET_BEER 959 { } else { addinventory GET_BEER 1 stopsound TELEPORT addphealth 5 spawn BEER3 soundonce CHUG quote 151 }
+ifpinventory GET_BEER 719 { } else { addinventory GET_BEER 1 stopsound TELEPORT addphealth 5 spawn BEER2 soundonce CHUG quote 151 }
+ifpinventory GET_BEER 479 { } else { addinventory GET_BEER 1 stopsound TELEPORT addphealth 5 spawn BEER1 soundonce CHUG quote 151 }
+ifpinventory GET_BEER 239 { } else { spawn MOONSHINE1 addinventory GET_BEER 1 stopsound TELEPORT addphealth 5 soundonce CHUG quote 151 }
+ifpinventory GET_HEATS 1199 { } else { addinventory GET_HEATS 1 spawn POWDERKEGSPRITE }
+
+getplayer[THISACTOR].curr_weapon CURRWEAPON
+getplayer[THISACTOR].kickback_pic KICKBACKPIC
+ifvare CURRWEAPON MOTORCYCLE_WEAPON ifp palive { ifvarn KICKBACKPIC 0 { sound AK3 shoot RIFLE } ifvare KICKBACKPIC 4 { addammo MOTORCYCLE_WEAPON -1 } ifvare KICKBACKPIC 5 { setplayer[THISACTOR].kickback_pic 0 } }
+
+  
+  //! Init
+  ifaction 0 {
+    setplayer[THISACTOR].gotweapon MOTORCYCLE_WEAPON 0
+    setplayer[THISACTOR].gotweapon BOAT_WEAPON 0
+    action PSTAND
+  }
+  
+  //! limit jumping distance
+  getplayer[THISACTOR].jumping_counter temp
+  ifvare temp 901
+  {
+    setplayer[THISACTOR].jumping_counter 0
+    getplayer[THISACTOR].poszv temp
+    mulvar temp 2
+    divvar temp 9
+    setplayer[THISACTOR].poszv temp
+  }
+  
+  ifdead
+  {
+
+    ifsquished
+      palfrom 32 63 63 63
+    else
+      fall
+
+    ifactioncount 7
+      move 0
+    else ifactioncount 6
+    {
+      ifmultiplayer
+        nullop
+      else
+      {
+        ifrnd 32
+          sound LNRD_KILLED5
+        else
+          ifrnd 32
+            sound LN_BNCH
+        else
+          ifrnd 32
+            sound LN_STANK
+        else
+          ifrnd 32
+            sound LN_BITCH
+      }
+    }
+
+    ifaction PLYINGDEAD
+    {
+      // cstat 0
+      ifactioncount 3
+        move PSTOPED
+      quote 13
+      ifhitspace
+      {
+        action PSTAND
+        spawn LNRDLYINGDEAD
+        resetplayer
+      }
+      break
+    }
+
+    ifaction PTHROWNBACK
+    {
+      ifactioncount 5
+      {
+        spawn BLOODPOOL
+        action PLYINGDEAD
+      }
+      else
+        ifactioncount 1
+          move 0
+      break
+    }
+
+    ifaction PEXPLODEAD
+    {
+      quote 13
+      ifhitspace
+      {
+        resetplayer
+        action PSTAND
+      }
+      break
+    }
+    ifaction PEXPLODE
+    {
+      ifactioncount 5
+      {
+        action PEXPLODEAD
+        spawn BLOODPOOL
+      }
+      break
+    }
+
+    ifinwater
+    {
+      action PLYINGDEAD
+      spawn WATERBUBBLE
+      spawn WATERBUBBLE
+    }
+    else
+    {
+      action PEXPLODE
+      state standard_pjibs
+      cstat 32768
+      sound SQUISHED
+      sound LNRD_DEAD
+    }
+
+    tossweapon
+
+    break
+  }
+
+  ifsquished
+  {
+    strength -1
+    sound SQUISHED
+    state random_ooz
+    break
+  }
+
+  ifp ponmoonshine
+  {
+    ifp pstanding
+      nullop
+    else
+      spawn FRAMEEFFECT1
+  }
+
+  ifhitweapon
+  {
+    ifdead
+    {
+      ifmultiplayer
+        sound LNRD_KILLED4
+    }
+    else
+    {
+      ifmultiplayer
+      {
+        ifphealthl YELLHURTSOUNDSTRENGTHMP
+        {
+          ifrnd 64
+            sound LN_PAIN2
+          else ifrnd 85
+            sound LN_PAIN3
+          else ifrnd 128
+            sound LN_PAIN4
+          else
+            sound LNRD_DEAD
+        }
+        else
+        {
+          state lnsndpain
+        }
+      }
+      else
+      {
+        ifphealthl YELLHURTSOUNDSTRENGTH
+        {
+          ifrnd 74
+            sound LN_PAIN2
+          else
+            ifrnd 8
+              sound LN_PAIN3
+          else
+            sound LN_PAIN4
+        }
+        ifrnd 128
+          sound LN_PAIN8
+      }
+    }
+    ifstrength TOUGH
+    {
+      // state headhitstate
+      sound LNRD_GRUNT
+      //! ifp pstanding
+      ifaction PSTAND
+        action PFLINTCHING
+    }
+
+    ifwasweapon MOTOHIT
+    {
+      ifmotofast
+      {
+        ifrnd 32
+          spawn BLOOD
+        ifdead
+          state standard_pjibs
+        palfrom 48 52
+        break
+      }
+      else
+      {
+        palfrom 16 32 
+      }
+    }
+    ifwasweapon BOATHIT
+    {
+      ifmotofast
+      {
+        ifrnd 32
+          spawn BLOOD
+        ifdead
+          state standard_pjibs
+        palfrom 48 52
+        break
+      }
+      else
+      {
+        palfrom 16 32 
+      }
+    }
+    ifwasweapon SLINGBLADE
+    {
+      ifrnd 32
+        spawn BLOOD
+      ifdead
+        state standard_pjibs
+      palfrom 48 52
+      break
+    }
+    ifwasweapon CROSSBOW
+    {
+      ifrnd 32
+        spawn BLOOD
+      ifdead
+        state standard_pjibs
+      palfrom 48 52
+      break
+    }
+    ifwasweapon RADIUSEXPLOSION
+    {
+      ifrnd 32
+        spawn BLOOD
+      ifdead
+        state standard_pjibs
+      palfrom 48 52
+      break
+    }
+    ifwasweapon SHOTSPARK1 {
+      palfrom 24 48
+    }
+    ifwasweapon CROWBAR
+      palfrom 16 32
+    ifwasweapon FIRELASER
+      palfrom 32 32
+
+    ifdead
+    {
+      action PTHROWNBACK
+      tossweapon
+    }
+
+    state random_wall_jibs
+
+    break
+  }
+
+  // ride the bike or boat  
+  ifaction PLAYERONMOTO {
+    getinput[THISACTOR].fvel temp
+    ifvare temp 0 soundonce BIKEIDLE
+    else soundonce BIKELOOP
+    setplayer[THISACTOR].jumping_counter 0
+    setplayer[THISACTOR].horiz 100
+    
+    getplayer[THISACTOR].movement_lock temp
+    ifvare temp 15 {
+      ifhitspace nullop else { //ifactioncount 8 {
+        spawn EMPTYBIKE
+        setplayer[THISACTOR].curr_weapon 1
+        setplayer[THISACTOR].weapon_pos -1
+        setplayer[THISACTOR].runspeed RUNNINGSPEED
+        setplayer[THISACTOR].movement_lock 0
+        action PSTAND
+        break
+      }
+    } else ifvarn WEAPON MOTORCYCLE_WEAPON { // block weapon change
+      setplayer[THISACTOR].curr_weapon MOTORCYCLE_WEAPON
+      setplayer[THISACTOR].weapon_pos -1
+      // stopsound INSERT_CLIP
+      // stopsound SHOTGUN_COCK
+      // stopsound SELECT_WEAPON
+    }
+
+
+    //! turn rate as function of speed
+    //! accelerating/decelerating
+
+    // Quit the vehicle at rest when hitting space
+    ifactioncount 8
+      ifp pstanding
+        ifhitspace {
+          setplayer[THISACTOR].weapon_pos -1
+          setplayer[THISACTOR].gotweapon MOTORCYCLE_WEAPON 0
+          setplayer[THISACTOR].movement_lock 15 
+          resetactioncount
+        }
+
+    // Sink
+    ifonwater {
+	  ifp ponground setplayer[THISACTOR].runspeed WRONGWAYSPEED
+      else setplayer[THISACTOR].runspeed VEHICLESPEED
+    } else ifinwater {
+      setplayer[THISACTOR].poszv 1000
+      setplayer[THISACTOR].runspeed 0
+    } else setplayer[THISACTOR].runspeed VEHICLESPEED
+    break
+  } else ifaction PLAYERONBOAT {
+    getinput[THISACTOR].fvel temp
+    ifvare temp 0 soundonce FBOATIDL
+    else soundonce FBOATRUN
+    setplayer[THISACTOR].jumping_counter 0
+    setplayer[THISACTOR].horiz 110
+    
+    getplayer[THISACTOR].movement_lock temp
+    ifvare temp 15  {
+      ifhitspace nullop else { //ifactioncount 8 {
+        spawn EMPTYBOAT
+        soundonce FBOATDN
+        setplayer[THISACTOR].curr_weapon 1
+        setplayer[THISACTOR].weapon_pos -1
+        setplayer[THISACTOR].runspeed RUNNINGSPEED
+        setplayer[THISACTOR].movement_lock 0
+        action PSTAND
+        break
+      }
+    } else ifvarn WEAPON BOAT_WEAPON { // block weapon change
+      setplayer[THISACTOR].curr_weapon BOAT_WEAPON
+      setplayer[THISACTOR].weapon_pos -1
+      // stopsound INSERT_CLIP
+      // stopsound SHOTGUN_COCK
+      // stopsound SELECT_WEAPON
+    }
+
+
+    //! turn rate as function of speed
+    //! accelerating/decelerating
+
+
+    // Quit the vehicle at rest when hitting space
+    ifactioncount 8
+      ifp pstanding
+        ifhitspace {
+          setplayer[THISACTOR].weapon_pos -1
+          setplayer[THISACTOR].gotweapon BOAT_WEAPON 0
+          setplayer[THISACTOR].movement_lock 15 
+          resetactioncount
+        }
+
+    // Float
+    ifonwater setplayer[THISACTOR].runspeed VEHICLESPEED
+    else ifinwater setplayer[THISACTOR].poszv -20000
+    else ifp ponground setplayer[THISACTOR].runspeed WRONGWAYSPEED
+    else setplayer[THISACTOR].runspeed VEHICLESPEED
+    break
+  } else ifhitspace nullop
+  else {
+    getplayer[THISACTOR].gotweapon MOTORCYCLE_WEAPON temp
+    ifvarn temp 0 {
+      setplayer[THISACTOR].movement_lock 14 // only forward
+      setplayer[THISACTOR].curr_weapon MOTORCYCLE_WEAPON
+      setplayer[THISACTOR].weapon_pos -1
+      action PLAYERONMOTO
+      break
+    }
+    getplayer[THISACTOR].gotweapon BOAT_WEAPON temp
+    ifvarn temp 0 {
+      setplayer[THISACTOR].movement_lock 12 // only forward and back
+      setplayer[THISACTOR].curr_weapon BOAT_WEAPON
+      setplayer[THISACTOR].weapon_pos -1
+      action PLAYERONBOAT
+      break
+    }
+  }
+  
+  ifaction PFLINTCHING
+  {
+    ifactioncount 2
+      action PSTAND
+    break
+  }
+
+  ifinwater
+  {
+    ifaction PTREDWATER
+    {
+      ifp pwalking prunning
+        action PSWIMMINGGO
+    }
+    else
+      ifp pstanding pwalkingback prunningback
+        action PTREDWATER
+    else
+    {
+      ifaction PSWIMMING
+      {
+        ifrnd 4
+          spawn WATERBUBBLE
+        ifactioncount 4
+          action PSWIMMINGWAIT
+      }
+      else
+        ifaction PSWIMMINGWAIT
+      {
+        ifactioncount 2
+          action PSWIMMINGGO
+      }
+      else
+        ifaction PSWIMMINGGO
+      {
+        ifactioncount 2
+          action PSWIMMING
+      }
+      else
+        action PTREDWATER
+    }
+
+    ifrnd 4
+      spawn WATERBUBBLE // For effect
+
+    break
+  }
+  else
+  {
+    ifaction PTREDWATER
+      action PSTAND
+    ifaction PSWIMMING
+      action PSTAND
+    ifaction PSWIMMINGWAIT
+      action PSTAND
+    ifaction PSWIMMINGGO
+      action PSTAND
+    ifaction PJPHOUVER
+      action PFALLING
+  }
+
+  ifaction PFALLING
+  {
+    ifp ponground
+      action PSTAND
+    else
+    {
+      ifp pfalling
+        break
+      else
+        state check_pstandard
+    }
+  }
+
+  ifaction PDUCKING
+  {
+    ifgapzl 48
+    {
+      ifp pwalking pwalkingback prunning prunningback
+        action PCRAWLING
+    }
+    else ifp pducking
+    {
+      ifp pwalking pwalkingback prunning prunningback
+        action PCRAWLING
+    }
+    else
+    {
+      ifp pstanding
+        action PSTAND
+      else
+        state check_pstandard
+    }
+  }
+  else ifaction PCRAWLING
+  {
+    ifgapzl 48
+    {
+      ifp pstanding
+        action PCRAWLING
+    }
+    else
+      ifp pducking
+    {
+      ifp pstanding
+        action PDUCKING
+    }
+    else
+    {
+      ifp pstanding
+        action PSTAND
+      else
+        state check_pstandard
+    }
+  }
+  else
+    ifgapzl 48
+      action PDUCKING
+
+  else
+    ifaction PJUMPING
+  {
+    ifp ponground
+      action PSTAND
+    else
+      ifactioncount 4
+        ifp pfalling
+          action PFALLING
+  }
+
+  ifp pfalling
+    action PFALLING
+  else ifaction PSTAND
+  {
+      state check_pstandard
+  }
+  else ifaction PAKICKING
+  {
+    ifactioncount 2
+      action PSTAND
+    break
+  }
+  else ifaction PWALK
+  {
+    ifp pfalling
+      action PFALLING
+    else
+      ifp pstanding
+        action PSTAND
+    else
+      ifp prunning
+        action PRUN
+    else
+      ifp pwalkingback
+        action PWALKBACK
+    else
+      ifp prunningback
+        action PRUNBACK
+    else
+      ifp pjumping
+        action PJUMPING
+    else
+      ifp pducking
+        action PDUCKING
+  }
+  else ifaction PRUN
+  {
+    ifp pstanding
+      action PSTAND
+    else
+      ifp pwalking
+        action PWALK
+    else
+      ifp pwalkingback
+        action PWALKBACK
+    else
+      ifp prunningback
+        action PRUNBACK
+    else
+      ifp pjumping
+        action PJUMPING
+    else
+      ifp pducking
+        action PDUCKING
+  }
+  else ifaction PWALKBACK
+  {
+    ifp pstanding
+      action PSTAND
+    else
+      ifp pwalking
+        action PWALK
+    else
+      ifp prunning
+        action PRUN
+    else
+      ifp prunningback
+        action PRUNBACK
+    else
+      ifp pjumping
+        action PJUMPING
+    else
+      ifp pducking
+        action PDUCKING
+  }
+
+  else
+    ifaction PRUNBACK
+  {
+    ifp pstanding
+      action PSTAND
+    else
+      ifp pwalking
+        action PWALK
+    else
+      ifp prunning
+        action PRUN
+    else
+      ifp pwalkingback
+        action PWALKBACK
+    else
+      ifp pjumping
+        action PJUMPING
+    else
+      ifp pducking
+        action PDUCKING
+  }
+enda
+
+
+// States defining RR-specific keywords
+
+state smackbubba
+	getplayer[THISACTOR].cursectnum tmp1
+	setsector[tmp1].lotag 65535 // create end-of-level sector
+ends
+
+state fakebubba
+	checkactivatormotion 669 ifvarn RETURN 1 { operateactivators 669 0 }
+ends
+
+state motoloopsnd
+	ifp palive { soundonce BIKELOOP } else { soundonce BIKEIDLE }
+ends
+
+state garybanjo
+	soundonce BANJO3
+ends
+
+state mamaquake
+	quake 12
+ends
+
+state mamaspawn
+	spawn RABBIT
+ends
+
+state mamatrigger
+	checkactivatormotion 667 ifvarn RETURN 1 { operateactivators 667 0 }
+ends
+
+state mamaend
+	endofgame 3
+ends
+
+state tearitup
+	cstat 2 // make tornado transparent
+ends
+
+state larrybird
+	getplayer[THISACTOR].posz tmp1
+	addvar tmp1 -25600
+	setplayer[THISACTOR].posz tmp1
+ends
+
+
+
+
+

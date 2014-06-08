@@ -27,7 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // #define VULGARITY
 
-char *defsfilename = "duke3d.def";
+char *defsfilename = "redneck.def";
 
 extern char keystatus[];
 extern int16_t defaultspritecstat;
@@ -44,6 +44,7 @@ extern int32_t zmode, kensplayerheight, zlock;
 extern int16_t editstatus, searchit;
 extern int32_t searchx, searchy, osearchx, osearchy;      //search input
 extern int16_t searchsector, searchwall, searchstat;     //search output
+extern int16_t searchbottomwall;
 
 #define COLOR_RED 248
 #define COLOR_WHITE 31
@@ -100,12 +101,12 @@ static void SearchSectorsForward();
 static void SearchSectorsBackward();
 static inline void SpriteName(int16_t spritenum, char *lo2);
 static void PrintStatus(char *string,int32_t num,char x,char y,char color);
-static inline void SetBOSS1Palette();
-static inline void SetSLIMEPalette();
-static inline void SetWATERPalette();
-static inline void SetGAMEPalette();
+void SetBOSS1Palette();
+void SetSLIMEPalette();
+void SetWATERPalette();
+void SetGAMEPalette();
 
-extern int16_t grid;
+extern int32_t grid, autogrid;
 
 static void EditSpriteData(int16_t spritenum);
 static void EditWallData(int16_t wallnum);

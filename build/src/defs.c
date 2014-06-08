@@ -11,6 +11,7 @@
 #include "scriptfile.h"
 #include "cache1d.h"
 #include "kplib.h"
+#include "quicklz.h"
 
 enum
 {
@@ -175,8 +176,8 @@ static tokenlist modelskintokens[] =
     { "intensity",     T_PARAM      },
     { "scale",         T_PARAM      },
     { "detailscale",   T_PARAM      },
-    { "specpower",     T_SPECPOWER  },
-    { "specfactor",    T_SPECFACTOR },
+    { "specpower",     T_SPECPOWER  }, { "parallaxscale", T_SPECPOWER },
+    { "specfactor",    T_SPECFACTOR }, { "parallaxbias", T_SPECFACTOR },
 };
 
 static tokenlist modelhudtokens[] =
@@ -282,14 +283,9 @@ static int32_t getatoken(scriptfile *sf, tokenlist *tl, int32_t ntokens)
 static int32_t lastmodelid = -1, lastvoxid = -1, modelskin = -1, lastmodelskin = -1, seenframe = 0;
 extern int32_t nextvoxid;
 
-extern char faketile[MAXTILES];
-extern char *faketiledata[MAXTILES];
-
 #if defined(POLYMOST) && defined(USE_OPENGL)
 extern float alphahackarray[MAXTILES];
 #endif
-extern char spritecol2d[MAXTILES][2];
-extern char vgapal16[4*256];
 
 static const char *skyfaces[6] =
 {
@@ -593,7 +589,7 @@ static int32_t defsparser(scriptfile *script)
         }
         case T_TILEFROMTEXTURE:
         {
-            char *texturetokptr = script->ltextptr, *textureend, *fn, *tfn = NULL;
+            char *texturetokptr = script->ltextptr, *textureend, *fn, *tfn = NULL, *ftd = NULL;
             int32_t tile=-1, token, i;
             int32_t alphacut = 255;
             int32_t xoffset = 0, yoffset = 0;
@@ -662,6 +658,7 @@ static int32_t defsparser(scriptfile *script)
 
                 //            initprintf("got bpl %d xsiz %d ysiz %d\n",bpl,xsiz,ysiz);
 
+                ftd = Bmalloc(xsiz*ysiz);
                 faketiledata[tile] = Bmalloc(xsiz*ysiz);
 
                 for (i=xsiz-1; i>=0; i--)
@@ -669,8 +666,8 @@ static int32_t defsparser(scriptfile *script)
                     for (j=ysiz-1; j>=0; j--)
                     {
                         col = (palette_t *)&picptr[j*xsiz+i];
-                        if (col->f < alphacut) { faketiledata[tile][i*ysiz+j] = 255; continue; }
-                        faketiledata[tile][i*ysiz+j] = getclosestcol(col->b>>2,col->g>>2,col->r>>2);
+                        if (col->f < alphacut) { ftd[i*ysiz+j] = 255; continue; }
+                        ftd[i*ysiz+j] = getclosestcol(col->b>>2,col->g>>2,col->r>>2);
                     }
                     //                initprintf(" %d %d %d %d\n",col->r,col->g,col->b,col->f);
                 }
@@ -679,7 +676,8 @@ static int32_t defsparser(scriptfile *script)
                 {
                     tilesizx[tile] = xsiz;
                     tilesizy[tile] = ysiz;
-                    faketile[tile] = 2;
+
+                    faketilesiz[tile] = qlz_compress(ftd, faketiledata[tile], xsiz*ysiz, state_compress);
 
                     xoffset = clamp(xoffset, -128, 127);
                     picanm[tile] = (picanm[tile]&0xffff00ff)+((xoffset&255)<<8);
@@ -693,6 +691,7 @@ static int32_t defsparser(scriptfile *script)
                 }
 
                 Bfree(picptr);
+                Bfree(ftd);
             }
         }
         break;
@@ -701,7 +700,7 @@ static int32_t defsparser(scriptfile *script)
             int32_t tile, xsiz, ysiz, j, i;
             int32_t *picptr = NULL;
             int32_t bpl;
-            char *fn;
+            char *fn, *ftd = NULL;
             palette_t *col;
 
             if (scriptfile_getsymbol(script,&tile)) break;
@@ -711,6 +710,7 @@ static int32_t defsparser(scriptfile *script)
 
 //            initprintf("got bpl %d xsiz %d ysiz %d\n",bpl,xsiz,ysiz);
 
+            ftd = Bmalloc(xsiz*ysiz);
             faketiledata[tile] = Bmalloc(xsiz*ysiz);
 
             for (i=xsiz-1; i>=0; i--)
@@ -718,8 +718,8 @@ static int32_t defsparser(scriptfile *script)
                 for (j=ysiz-1; j>=0; j--)
                 {
                     col = (palette_t *)&picptr[j*xsiz+i];
-                    if (col->f != 255) { faketiledata[tile][i*ysiz+j] = 255; continue; }
-                    faketiledata[tile][i*ysiz+j] = getclosestcol(col->b>>2,col->g>>2,col->r>>2);
+                    if (col->f != 255) { ftd[i*ysiz+j] = 255; continue; }
+                    ftd[i*ysiz+j] = getclosestcol(col->b>>2,col->g>>2,col->r>>2);
                 }
 //                initprintf(" %d %d %d %d\n",col->r,col->g,col->b,col->f);
             }
@@ -728,7 +728,7 @@ static int32_t defsparser(scriptfile *script)
             {
                 tilesizx[tile] = xsiz;
                 tilesizy[tile] = ysiz;
-                faketile[tile] = 2;
+                faketilesiz[tile] = qlz_compress(ftd, faketiledata[tile], xsiz*ysiz, state_compress);
                 picanm[tile] = 0;
 
                 j = 15; while ((j > 1) && (pow2long[j] > xsiz)) j--;
@@ -738,12 +738,12 @@ static int32_t defsparser(scriptfile *script)
             }
 
             Bfree(picptr);
+            Bfree(ftd);
             break;
         }
         case T_DUMMYTILE:
         {
             int32_t tile, xsiz, ysiz, j;
-            extern char faketile[MAXTILES];
 
             if (scriptfile_getsymbol(script,&tile)) break;
             if (scriptfile_getsymbol(script,&xsiz)) break;
@@ -753,7 +753,7 @@ static int32_t defsparser(scriptfile *script)
             {
                 tilesizx[tile] = xsiz;
                 tilesizy[tile] = ysiz;
-                faketile[tile] = 1;
+                faketilesiz[tile] = -1;
                 picanm[tile] = 0;
 
                 j = 15; while ((j > 1) && (pow2long[j] > xsiz)) j--;
@@ -767,7 +767,6 @@ static int32_t defsparser(scriptfile *script)
         case T_DUMMYTILERANGE:
         {
             int32_t tile1,tile2,xsiz,ysiz,i,j;
-            extern char faketile[MAXTILES];
 
             if (scriptfile_getnumber(script,&tile1)) break;
             if (scriptfile_getnumber(script,&tile2)) break;
@@ -790,7 +789,7 @@ static int32_t defsparser(scriptfile *script)
                         {
                             tilesizx[i] = xsiz;
                             tilesizy[i] = ysiz;
-                            faketile[i] = 1;
+                            faketilesiz[i] = -1;
                             picanm[i] = 0;
 
                             j = 15; while ((j > 1) && (pow2long[j] > xsiz)) j--;
@@ -1512,7 +1511,7 @@ static int32_t defsparser(scriptfile *script)
                     char *paltokptr = script->ltextptr, *palend;
                     int32_t pal=-1, i;
                     char *fn = NULL, *tfn = NULL;
-                    double alphacut = -1.0, xscale = 1.0, yscale = 1.0;
+                    double alphacut = -1.0, xscale = 1.0, yscale = 1.0, specpower = 1.0, specfactor = 1.0;
                     char flags = 0;
 
                     if (scriptfile_getsymbol(script,&pal)) break;
@@ -1529,6 +1528,10 @@ static int32_t defsparser(scriptfile *script)
                             scriptfile_getdouble(script,&xscale); break;
                         case T_YSCALE:
                             scriptfile_getdouble(script,&yscale); break;
+                        case T_SPECPOWER:
+                            scriptfile_getdouble(script,&specpower); break;
+                        case T_SPECFACTOR:
+                            scriptfile_getdouble(script,&specfactor); break;
                         case T_NOCOMPRESS:
                             flags |= 1; break;
                         case T_NODOWNSIZE:
@@ -1572,7 +1575,7 @@ static int32_t defsparser(scriptfile *script)
                     xscale = 1.0f / xscale;
                     yscale = 1.0f / yscale;
 
-                    hicsetsubsttex(tile,pal,fn,alphacut,xscale,yscale, 1.0f, 1.0f,flags);
+                    hicsetsubsttex(tile,pal,fn,alphacut,xscale,yscale, specpower, specfactor,flags);
                 }
                 break;
                 case T_DETAIL: case T_GLOW: case T_SPECULAR: case T_NORMAL:
@@ -1815,12 +1818,17 @@ static int32_t defsparser(scriptfile *script)
 int32_t loaddefinitionsfile(char *fn)
 {
     scriptfile *script;
+    int32_t f = flushlogwindow;
 
     script = scriptfile_fromfile(fn);
     if (!script) return -1;
 
+    flushlogwindow = 1;
+    initprintf("Loading '%s'\n",fn);
+    flushlogwindow = 0;
     defsparser(script);
 
+    flushlogwindow = f;
     scriptfile_close(script);
     scriptfile_clearsymbols();
 

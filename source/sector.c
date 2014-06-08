@@ -47,7 +47,7 @@ int32_t A_CallSound(int32_t sn,int32_t whatsprite) {
                     if (SLT) {
                         A_PlaySound(SLT,whatsprite);
                         if (SHT && SLT != SHT && SHT < MAXSOUNDS)
-                            A_StopSound(SHT,T6);
+                            S_StopEnvSound(SHT,T6);
                         T6 = whatsprite;
                     }
 
@@ -57,7 +57,7 @@ int32_t A_CallSound(int32_t sn,int32_t whatsprite) {
             } else if (SHT < MAXSOUNDS) {
                 if (SHT) A_PlaySound(SHT,whatsprite);
                 if ((g_sounds[SLT].m&1) || (SHT && SHT != SLT))
-                    A_StopSound(SLT,T6);
+                    S_StopEnvSound(SLT,T6);
                 T6 = whatsprite;
                 T1 = 0;
             }
@@ -170,9 +170,9 @@ int32_t isanearoperator(int32_t lotag) {
 }
 
 inline int32_t G_CheckPlayerInSector(int32_t sect) {
-    int32_t i = connecthead;
-    for (; i>=0; i=connectpoint2[i])
-        if (sprite[g_player[i].ps->i].sectnum == sect) return i;
+    int32_t i;
+    TRAVERSE_CONNECT(i)
+    if (sprite[g_player[i].ps->i].sectnum == sect) return i;
     return -1;
 }
 
@@ -203,7 +203,7 @@ int32_t dist(spritetype *s1,spritetype *s2) {
 }
 
 int32_t __fastcall A_FindPlayer(spritetype *s, int32_t *d) {
-    if (ud.multimode < 2) {
+    if ((!g_netServer && ud.multimode < 2)) {
         *d = klabs(g_player[myconnectindex].ps->oposx-s->x) + klabs(g_player[myconnectindex].ps->oposy-s->y) + ((klabs(g_player[myconnectindex].ps->oposz-s->z+(28<<8)))>>4);
         return myconnectindex;
     }
@@ -275,7 +275,7 @@ void G_DoSectorAnimations(void) {
                         if (p == myconnectindex) {
                             my.z += v;
                             myvel.z = 0;
-                            myzbak[((movefifoplc-1)&(MOVEFIFOSIZ-1))] = g_player[p].ps->posz;
+                            myzbak[0] = g_player[p].ps->posz;
                         }
                     }
 
@@ -317,10 +317,7 @@ int32_t SetAnimation(int32_t animsect,int32_t *animptr, int32_t thegoal, int32_t
     animatesect[j] = animsect;
     animateptr[j] = animptr;
     animategoal[j] = thegoal;
-    if (thegoal >= *animptr)
-        animatevel[j] = thevel;
-    else
-        animatevel[j] = -thevel;
+    animatevel[j] = (thegoal >= *animptr) ? thevel : -thevel;
 
     if (j == g_animateCount) g_animateCount++;
 
@@ -334,12 +331,12 @@ void G_AnimateCamSprite(void) {
 
     if (camsprite <= 0) return;
 
-    if (T1 >= 11) {
+    if (T1 >= 4) {
         T1 = 0;
 
         if (g_player[screenpeek].ps->newowner >= 0)
             OW = g_player[screenpeek].ps->newowner;
-        else if (OW >= 0 && dist(&sprite[g_player[screenpeek].ps->i],&sprite[i]) < 2048) {
+        else if (OW >= 0 && dist(&sprite[g_player[screenpeek].ps->i],&sprite[i]) < 8192) {
             if (waloff[TILE_VIEWSCR] == 0)
                 allocatepermanenttile(TILE_VIEWSCR,tilesizx[PN],tilesizy[PN]);
             else walock[TILE_VIEWSCR] = 255;
@@ -886,11 +883,12 @@ void G_OperateActivators(int32_t low,int32_t snum) {
 
     i = headspritestat[STAT_ACTIVATOR];
     k = -1;
+
     while (i >= 0) {
         if (sprite[i].lotag == low) {
             if (sprite[i].picnum == ACTIVATORLOCKED) {
                 if (sector[SECT].lotag&16384)
-                    sector[SECT].lotag &= 65535-16384;
+                    sector[SECT].lotag &= ~16384;
                 else
                     sector[SECT].lotag |= 16384;
 
@@ -986,13 +984,15 @@ int32_t P_ActivateSwitch(int32_t snum,int32_t w,int32_t switchtype) {
     if (w < 0) return 0;
 
     if (switchtype == 1) { // A wall sprite
+        if (ActorExtra[w].lasttransport == totalclock) return 0;
+        ActorExtra[w].lasttransport = totalclock;
         lotag = sprite[w].lotag;
         if (lotag == 0) return 0;
         hitag = sprite[w].hitag;
 
 //        sx = sprite[w].x;
 //        sy = sprite[w].y;
-        Bmemcpy(&davector, &sprite[w], sizeof(int32_t) * 3);
+        Bmemcpy(&davector, &sprite[w], sizeof(vec3_t));
         picnum = sprite[w].picnum;
         switchpal = sprite[w].pal;
     } else {
@@ -1314,15 +1314,15 @@ int32_t P_ActivateSwitch(int32_t snum,int32_t w,int32_t switchtype) {
                 picnum == TECHSWITCH || picnum == TECHSWITCH+1) {
             if (picnum == ALIENSWITCH || picnum == ALIENSWITCH+1) {
                 if (switchtype == 1)
-                    S_PlaySoundXYZ(ALIEN_SWITCH1, w, &davector);
-                else S_PlaySoundXYZ(ALIEN_SWITCH1,g_player[snum].ps->i,&davector);
+                    S_PlaySound3D(ALIEN_SWITCH1, w, &davector);
+                else S_PlaySound3D(ALIEN_SWITCH1,g_player[snum].ps->i,&davector);
             } else {
                 if (switchtype == 1)
-                    S_PlaySoundXYZ(SWITCH_ON, w, &davector);
-                else S_PlaySoundXYZ(SWITCH_ON,g_player[snum].ps->i,&davector);
+                    S_PlaySound3D(SWITCH_ON, w, &davector);
+                else S_PlaySound3D(SWITCH_ON,g_player[snum].ps->i,&davector);
             }
             if (numdips != correctdips) break;
-            S_PlaySoundXYZ(END_OF_LEVEL_WARN,g_player[snum].ps->i,&davector);
+            S_PlaySound3D(END_OF_LEVEL_WARN,g_player[snum].ps->i,&davector);
         }
     case DIPSWITCH2__STATIC:
         //case DIPSWITCH2+1:
@@ -1403,11 +1403,11 @@ int32_t P_ActivateSwitch(int32_t snum,int32_t w,int32_t switchtype) {
 
         if (hitag == 0 && CheckDoorTile(picnum) == 0) {
             if (switchtype == 1)
-                S_PlaySoundXYZ(SWITCH_ON,w,&davector);
-            else S_PlaySoundXYZ(SWITCH_ON,g_player[snum].ps->i,&davector);
+                S_PlaySound3D(SWITCH_ON,w,&davector);
+            else S_PlaySound3D(SWITCH_ON,g_player[snum].ps->i,&davector);
         } else if (hitag != 0) {
             if (switchtype == 1 && (g_sounds[hitag].m&4) == 0)
-                S_PlaySoundXYZ(hitag,w,&davector);
+                S_PlaySound3D(hitag,w,&davector);
             else A_PlaySound(hitag,g_player[snum].ps->i);
         }
 
@@ -1446,7 +1446,7 @@ void A_DamageWall(int32_t spr,int32_t dawallnum,const vec3_t *pos,int32_t atwith
     int32_t j, i, darkestwall;
     walltype *wal = &wall[dawallnum];
 
-    if (wal->overpicnum == MIRROR && wal->pal != 4 && A_CheckSpriteTileFlags(atwith,SPRITE_PROJECTILE) && (ActorExtra[spr].projectile.workslike & PROJECTILE_RPG)) {
+    if (wal->overpicnum == MIRROR && wal->pal != 4 && A_CheckSpriteTileFlags(atwith,SPRITE_PROJECTILE) && (SpriteProjectile[spr].workslike & PROJECTILE_RPG)) {
         if (wal->nextwall == -1 || wall[wal->nextwall].pal != 4) {
             A_SpawnWallGlass(spr,dawallnum,70);
             wal->cstat &= ~16;
@@ -1764,7 +1764,7 @@ void A_DamageObject(int32_t i,int32_t sn) {
     i &= (MAXSPRITES-1);
 
     if (A_CheckSpriteFlags(sn,SPRITE_PROJECTILE))
-        if (ActorExtra[sn].projectile.workslike & PROJECTILE_RPG)
+        if (SpriteProjectile[sn].workslike & PROJECTILE_RPG)
             rpg = 1;
     switchpicnum = PN;
     if ((PN > WATERFOUNTAIN)&&(PN < WATERFOUNTAIN+3)) {
@@ -2107,7 +2107,7 @@ void A_DamageObject(int32_t i,int32_t sn) {
     case PLAYERONWATER__STATIC:
         i = OW;
     default:
-        if ((sprite[i].cstat&16) && SHT == 0 && SLT == 0 && sprite[i].statnum == 0)
+        if ((sprite[i].cstat&16) && SHT == 0 && SLT == 0 && sprite[i].statnum == STAT_DEFAULT)
             break;
 
         if ((sprite[sn].picnum == CIRCLESAW || sprite[sn].owner != i) && sprite[i].statnum != 4) {
@@ -2149,14 +2149,14 @@ void A_DamageObject(int32_t i,int32_t sn) {
                     }
                 }
 
-                if (sprite[i].statnum == 2) {
+                if (sprite[i].statnum == STAT_ZOMBIEACTOR) {
                     changespritestat(i, STAT_ACTOR);
                     ActorExtra[i].timetosleep = SLEEPTIME;
                 }
 
             }
 
-            if (sprite[i].statnum != 2) {
+            if (sprite[i].statnum != STAT_ZOMBIEACTOR) {
                 if (sprite[sn].picnum == CIRCLESAW && ((PN == APLAYER && sprite[i].pal == 1) || (g_BUZSAWrSelfDamage == 0 && sprite[sn].owner == i)))
                     return;
 
@@ -2166,7 +2166,7 @@ void A_DamageObject(int32_t i,int32_t sn) {
                 ActorExtra[i].owner = sprite[sn].owner;
             }
 
-            if (sprite[i].statnum == 10) {
+            if (sprite[i].statnum == STAT_PLAYER) {
                 p = sprite[i].yvel;
                 if (g_player[p].ps->newowner >= 0) {
                     g_player[p].ps->newowner = -1;
@@ -2221,7 +2221,7 @@ void allignwarpelevators(void) {
 }
 
 void G_HandleSharedKeys(int32_t snum) {
-    int32_t i, k, dainv;
+    int32_t i, k = 0, dainv;
     uint32_t sb_snum = g_player[snum].sync->bits, j;
     DukePlayer_t *p = g_player[snum].ps;
 
@@ -2288,11 +2288,11 @@ void G_HandleSharedKeys(int32_t snum) {
                 ud.pause_on = 0;
             else ud.pause_on = 1+SHIFTS_IS_PRESSED;
             if (ud.pause_on) {
-                MUSIC_Pause();
+                S_PauseMusic(1);
                 FX_StopAllSounds();
                 S_ClearSoundLocks();
             } else {
-                if (ud.config.MusicToggle) MUSIC_Continue();
+                if (ud.config.MusicToggle) S_PauseMusic(0);
                 pub = NUMPAGES;
                 pus = NUMPAGES;
             }
@@ -2330,7 +2330,7 @@ void G_HandleSharedKeys(int32_t snum) {
             aGameVars[g_iReturnVarID].val.lValue = 0;
             X_OnEvent(EVENT_USENIGHTVISION,g_player[snum].ps->i,snum, -1);
             if (aGameVars[g_iReturnVarID].val.lValue == 0
-                    &&  p->heat_amount > 0) {
+                    &&  p->inv_amount[GET_HEATS] > 0) {
                 p->heat_on = !p->heat_on;
                 P_UpdateScreenPal(p);
                 p->inven_icon = 5;
@@ -2343,12 +2343,12 @@ void G_HandleSharedKeys(int32_t snum) {
             aGameVars[g_iReturnVarID].val.lValue = 0;
             X_OnEvent(EVENT_USESTEROIDS,g_player[snum].ps->i,snum, -1);
             if (aGameVars[g_iReturnVarID].val.lValue == 0) {
-                if (p->steroids_amount == 400) {
-                    p->steroids_amount--;
+                if (p->inv_amount[GET_STEROIDS] == 400) {
+                    p->inv_amount[GET_STEROIDS]--;
                     A_PlaySound(DUKE_TAKEPILLS,p->i);
                     P_DoQuote(12,p);
                 }
-                if (p->steroids_amount > 0)
+                if (p->inv_amount[GET_STEROIDS] > 0)
                     p->inven_icon = 2;
             }
             return;		// is there significance to returning?
@@ -2374,44 +2374,44 @@ CHECKINV1:
 
                     switch (dainv) {
                     case 4:
-                        if (p->jetpack_amount > 0 && i > 1)
+                        if (p->inv_amount[GET_JETPACK] > 0 && i > 1)
                             break;
-                        if (k) dainv = 5;
-                        else dainv = 3;
+                        if (k) dainv++;
+                        else dainv--;
                         goto CHECKINV1;
                     case 6:
-                        if (p->scuba_amount > 0 && i > 1)
+                        if (p->inv_amount[GET_SCUBA] > 0 && i > 1)
                             break;
-                        if (k) dainv = 7;
-                        else dainv = 5;
+                        if (k) dainv++;
+                        else dainv--;
                         goto CHECKINV1;
                     case 2:
-                        if (p->steroids_amount > 0 && i > 1)
+                        if (p->inv_amount[GET_STEROIDS] > 0 && i > 1)
                             break;
-                        if (k) dainv = 3;
-                        else dainv = 1;
+                        if (k) dainv++;
+                        else dainv--;
                         goto CHECKINV1;
                     case 3:
-                        if (p->holoduke_amount > 0 && i > 1)
+                        if (p->inv_amount[GET_HOLODUKE] > 0 && i > 1)
                             break;
-                        if (k) dainv = 4;
-                        else dainv = 2;
+                        if (k) dainv++;
+                        else dainv--;
                         goto CHECKINV1;
                     case 0:
                     case 1:
-                        if (p->firstaid_amount > 0 && i > 1)
+                        if (p->inv_amount[GET_FIRSTAID] > 0 && i > 1)
                             break;
                         if (k) dainv = 2;
                         else dainv = 7;
                         goto CHECKINV1;
                     case 5:
-                        if (p->heat_amount > 0 && i > 1)
+                        if (p->inv_amount[GET_HEATS] > 0 && i > 1)
                             break;
-                        if (k) dainv = 6;
-                        else dainv = 4;
+                        if (k) dainv++;
+                        else dainv--;
                         goto CHECKINV1;
                     case 7:
-                        if (p->boot_amount > 0 && i > 1)
+                        if (p->inv_amount[GET_BOOTS] > 0 && i > 1)
                             break;
                         if (k) dainv = 1;
                         else dainv = 6;
@@ -2424,38 +2424,20 @@ CHECKINV1:
                     aGameVars[g_iReturnVarID].val.lValue = dainv;
                     X_OnEvent(EVENT_INVENTORYLEFT,g_player[snum].ps->i,snum, -1);
                     dainv=aGameVars[g_iReturnVarID].val.lValue;
-                }
-                if (TEST_SYNC_KEY(sb_snum, SK_INV_RIGHT)) { // Inventory_Right
+                } else if (TEST_SYNC_KEY(sb_snum, SK_INV_RIGHT)) { // Inventory_Right
                     /*Gv_SetVar(g_iReturnVarID,dainv,g_player[snum].ps->i,snum);*/
                     aGameVars[g_iReturnVarID].val.lValue = dainv;
                     X_OnEvent(EVENT_INVENTORYRIGHT,g_player[snum].ps->i,snum, -1);
                     dainv=aGameVars[g_iReturnVarID].val.lValue;
                 }
 
-                p->inven_icon = dainv;
+                if (dainv >= 1) {
+                    p->inven_icon = dainv;
 
-                switch (dainv) {
-                case 1:
-                    P_DoQuote(3,p);
-                    break;
-                case 2:
-                    P_DoQuote(90,p);
-                    break;
-                case 3:
-                    P_DoQuote(91,p);
-                    break;
-                case 4:
-                    P_DoQuote(88,p);
-                    break;
-                case 5:
-                    P_DoQuote(101,p);
-                    break;
-                case 6:
-                    P_DoQuote(89,p);
-                    break;
-                case 7:
-                    P_DoQuote(6,p);
-                    break;
+                    if (dainv || p->inv_amount[GET_FIRSTAID]) {
+                        static const int32_t i[8] = { 3, 90, 91, 88, 101, 89, 6, 0 };
+                        P_DoQuote(i[dainv-1], p);
+                    }
                 }
             }
 
@@ -2465,34 +2447,16 @@ CHECKINV1:
 
         switch (j) {
         case 0:
-            X_OnEvent(EVENT_WEAPKEY1,p->i,snum, -1);
-            break;
         case 1:
-            X_OnEvent(EVENT_WEAPKEY2,p->i,snum, -1);
-            break;
         case 2:
-            X_OnEvent(EVENT_WEAPKEY3,p->i,snum, -1);
-            break;
         case 3:
-            X_OnEvent(EVENT_WEAPKEY4,p->i,snum, -1);
-            break;
         case 4:
-            X_OnEvent(EVENT_WEAPKEY5,p->i,snum, -1);
-            break;
         case 5:
-            X_OnEvent(EVENT_WEAPKEY6,p->i,snum, -1);
-            break;
         case 6:
-            X_OnEvent(EVENT_WEAPKEY7,p->i,snum, -1);
-            break;
         case 7:
-            X_OnEvent(EVENT_WEAPKEY8,p->i,snum, -1);
-            break;
         case 8:
-            X_OnEvent(EVENT_WEAPKEY9,p->i,snum, -1);
-            break;
         case 9:
-            X_OnEvent(EVENT_WEAPKEY10,p->i,snum, -1);
+            X_OnEvent(EVENT_WEAPKEY1+j,p->i,snum, -1);
             break;
         case 10:
             X_OnEvent(EVENT_PREVIOUSWEAPON,p->i,snum, -1);
@@ -2502,16 +2466,15 @@ CHECKINV1:
             break;
         }
 
-        if ((uint32_t) aGameVars[g_iReturnVarID].val.lValue != j)
-            j = (uint32_t) aGameVars[g_iReturnVarID].val.lValue;
+        j = (uint32_t) aGameVars[g_iReturnVarID].val.lValue;
 
         if (p->reloading == 1)
             j = -1;
-        else if (j > 0 && p->kickback_pic == 1 && p->weapon_pos == 1) {
+        else if ((int32_t)j != -1 && p->kickback_pic == 1 && p->weapon_pos == 1) {
             p->wantweaponfire = j;
             p->kickback_pic = 0;
         }
-        if (p->last_pissed_time <= (GAMETICSPERSEC*218) && p->show_empty_weapon == 0 && p->kickback_pic == 0 && p->quick_kick == 0 && sprite[p->i].xrepeat > 16 && p->access_incs == 0 && p->knee_incs == 0) {
+        if ((int32_t)j != -1 && p->last_pissed_time <= (GAMETICSPERSEC*218) && p->show_empty_weapon == 0 /*&& p->kickback_pic == 0*/ && p->quick_kick == 0 && sprite[p->i].xrepeat > 16 && p->access_incs == 0 && p->knee_incs == 0) {
             //            if(  ( p->weapon_pos == 0 || ( p->holster_weapon && p->weapon_pos == -9 ) ))
             {
                 if (j == 10 || j == 11) {
@@ -2521,10 +2484,9 @@ CHECKINV1:
 
                     while ((k >= 0 && k < 10) || (GAME_RA && k == BUZSAW_WEAPON && (p->subweapon&(1<<BUZSAW_WEAPON)))) {       // JBF 20040116: so we don't select grower with v1.3d
                         if (k == BUZSAW_WEAPON) { // JBF: this is handling next/previous with the grower selected
-                            if (j == (uint32_t)-1)
+                            if ((int32_t)j == -1)
                                 k = 5;
                             else k = 7;
-
                         } else {
                             k += j;
 
@@ -2563,13 +2525,12 @@ CHECKINV1:
                     }
                 }
 
-                k = -1;
-
                 Gv_SetVar(g_iWorksLikeVarID,aplWeaponWorksLike[p->curr_weapon][snum],p->i,snum);
                 Gv_SetVar(g_iWeaponVarID,j, p->i, snum);
-                aGameVars[g_iReturnVarID].val.lValue = 0;
+                aGameVars[g_iReturnVarID].val.lValue = j;
                 X_OnEvent(EVENT_SELECTWEAPON,p->i,snum, -1);
-                if (aGameVars[g_iReturnVarID].val.lValue == 0) {
+                j = aGameVars[g_iReturnVarID].val.lValue;
+                if ((int32_t)j != -1 && j <= MAX_WEAPONS) {
                     if (j == DYNAMITE_WEAPON && p->ammo_amount[DYNAMITE_WEAPON] == 0) {
                         k = headspritestat[STAT_ACTOR];
                         while (k >= 0) {
@@ -2608,104 +2569,45 @@ CHECKINV1:
                         p->weapon_pos = -9;
                     } else if ((int32_t)j >= 0 && p->gotweapon[j] && (uint32_t)p->curr_weapon != j)
                         switch (j) {
-                        case CROWBAR_WEAPON:
-                            P_AddWeapon(p, CROWBAR_WEAPON);
-                            break;
                         case CASUL_WEAPON:
-                            if (p->ammo_amount[CASUL_WEAPON] == 0)
-                                if (p->show_empty_weapon == 0) {
-                                    p->last_full_weapon = p->curr_weapon;
-                                    p->show_empty_weapon = 32;
-                                }
-                            P_AddWeapon(p, CASUL_WEAPON);
-                            break;
                         case SHOTGUN_WEAPON:
-                            if (p->ammo_amount[SHOTGUN_WEAPON] == 0 && p->show_empty_weapon == 0) {
-                                p->last_full_weapon = p->curr_weapon;
-                                p->show_empty_weapon = 32;
-                            }
-                            P_AddWeapon(p, SHOTGUN_WEAPON);
-                            break;
                         case RIFLE_WEAPON:
-                            if (p->ammo_amount[RIFLE_WEAPON] == 0 && p->show_empty_weapon == 0) {
-                                p->last_full_weapon = p->curr_weapon;
-                                p->show_empty_weapon = 32;
-                            }
-                            P_AddWeapon(p, RIFLE_WEAPON);
-                            break;
                         case CROSSBOW_WEAPON:
-                            if (p->ammo_amount[CROSSBOW_WEAPON] == 0)
-                                if (p->show_empty_weapon == 0) {
-                                    p->last_full_weapon = p->curr_weapon;
-                                    p->show_empty_weapon = 32;
-                                }
-                            P_AddWeapon(p, CROSSBOW_WEAPON);
-                            break;
                         case TEATGUN_WEAPON:
-                            if (p->ammo_amount[TEATGUN_WEAPON] == 0 && p->show_empty_weapon == 0) {
-                                p->last_full_weapon = p->curr_weapon;
-                                p->show_empty_weapon = 32;
-                            }
-                            P_AddWeapon(p, TEATGUN_WEAPON);
-                            break;
                         case THROWSAW_WEAPON:
-                            if (p->ammo_amount[THROWSAW_WEAPON] == 0 && p->show_empty_weapon == 0) {
-                                p->last_full_weapon = p->curr_weapon;
-                                p->show_empty_weapon = 32;
-                            }
-                            P_AddWeapon(p, THROWSAW_WEAPON);
-                            break;
                         case BUZSAW_WEAPON:
                         case ALIENARMGUN_WEAPON:
-
                             if (p->ammo_amount[j] == 0 && p->show_empty_weapon == 0) {
-                                p->show_empty_weapon = 32;
                                 p->last_full_weapon = p->curr_weapon;
+                                p->show_empty_weapon = 32;
                             }
-
+                        case CROWBAR_WEAPON:
                             P_AddWeapon(p, j);
                             break;
-                        case HANDREMOTE_WEAPON:
-                            if (k >= 0) { // Found in list of [1]'s
-                                p->curr_weapon = HANDREMOTE_WEAPON;
+
+                            /*if (k >= 0) // Found in list of [1]'s
+                            {
+                                p->curr_weapon = j;
                                 p->last_weapon = -1;
                                 p->weapon_pos = 10;
                             }
-                            break;
+                            break;*/
                         case DYNAMITE_WEAPON:
-                            if (p->ammo_amount[DYNAMITE_WEAPON] > 0 && p->gotweapon[DYNAMITE_WEAPON])
-                                P_AddWeapon(p, DYNAMITE_WEAPON);
-                            break;
                         case POWDERKEG_WEAPON:
-                            if (p->ammo_amount[POWDERKEG_WEAPON] > 0 && p->gotweapon[POWDERKEG_WEAPON])
-                                P_AddWeapon(p, POWDERKEG_WEAPON);
+                            if (p->ammo_amount[j] > 0 && p->gotweapon[j])
+                                P_AddWeapon(p, j);
                             break;
                         }
-                }
-
-            }
-            if (TEST_SYNC_KEY(sb_snum, SK_HOLSTER)) {
-                if (p->curr_weapon > CROWBAR_WEAPON) {
-                    if (p->holster_weapon == 0 && p->weapon_pos == 0) {
-                        p->holster_weapon = 1;
-                        p->weapon_pos = -1;
-                        P_DoQuote(73,p);
-                    } else if (p->holster_weapon == 1 && p->weapon_pos == -9) {
-                        p->holster_weapon = 0;
-                        p->weapon_pos = 10;
-                        P_DoQuote(74,p);
-                    }
                 }
             }
         }
 
         if (TEST_SYNC_KEY(sb_snum, SK_HOLODUKE) && p->newowner == -1) {
-
             if (p->holoduke_on == -1) {
                 aGameVars[g_iReturnVarID].val.lValue = 0;
                 X_OnEvent(EVENT_HOLODUKEON,g_player[snum].ps->i,snum, -1);
                 if (aGameVars[g_iReturnVarID].val.lValue == 0) {
-                    if (p->holoduke_amount > 0) {
+                    if (p->inv_amount[GET_HOLODUKE] > 0) {
                         p->inven_icon = 3;
 
                         if (p->cursectnum > -1) {
@@ -2734,19 +2636,16 @@ CHECKINV1:
             aGameVars[g_iReturnVarID].val.lValue = 0;
             X_OnEvent(EVENT_USEMEDKIT,g_player[snum].ps->i,snum, -1);
             if (aGameVars[g_iReturnVarID].val.lValue == 0) {
-                if (p->firstaid_amount > 0 && sprite[p->i].extra < p->max_player_health) {
+                if (p->inv_amount[GET_FIRSTAID] > 0 && sprite[p->i].extra < p->max_player_health) {
                     j = p->max_player_health-sprite[p->i].extra;
-                    if (j > 10) j = 10;
 
-                    if ((uint32_t)p->firstaid_amount > j) {
-                        p->firstaid_amount -= 10;
-                        sprite[p->i].extra += j;
-                        p->redneck_alcohol += 10;
-                        if (p->redneck_alcohol > 100) p->redneck_alcohol = 100;
+                    if ((uint32_t)p->inv_amount[GET_FIRSTAID] > j) {
+                        p->inv_amount[GET_FIRSTAID] -= j;
+                        sprite[p->i].extra = p->max_player_health;
                         p->inven_icon = 1;
                     } else {
-                        sprite[p->i].extra += p->firstaid_amount;
-                        p->firstaid_amount = 0;
+                        sprite[p->i].extra += p->inv_amount[GET_FIRSTAID];
+                        p->inv_amount[GET_FIRSTAID] = 0;
                         P_SelectNextInvItem(p);
                     }
                     A_PlaySound(425,p->i);
@@ -2758,14 +2657,14 @@ CHECKINV1:
             aGameVars[g_iReturnVarID].val.lValue = 0;
             X_OnEvent(EVENT_USEJETPACK,g_player[snum].ps->i,snum, -1);
             if (aGameVars[g_iReturnVarID].val.lValue == 0) {
-                if (p->jetpack_amount > 0) {
+                if (p->inv_amount[GET_JETPACK] > 0) {
                     p->jetpack_on = !p->jetpack_on;
                     if (p->jetpack_on) {
                         p->inven_icon = 4;
-                        if (p->scream_voice > FX_Ok) {
+                        if (p->scream_voice >= FX_Ok) {
                             FX_StopSound(p->scream_voice);
-                            S_TestSoundCallback(DUKE_SCREAM);
-                            p->scream_voice = FX_Ok;
+//                            S_TestSoundCallback(DUKE_SCREAM);
+                            p->scream_voice = -1;
                         }
 
                         A_PlaySound(DUKE_JETPACK_ON,p->i);
@@ -2775,8 +2674,8 @@ CHECKINV1:
                         p->hard_landing = 0;
                         p->poszv = 0;
                         A_PlaySound(DUKE_JETPACK_OFF,p->i);
-                        A_StopSound(DUKE_JETPACK_IDLE,p->i);
-                        A_StopSound(DUKE_JETPACK_ON,p->i);
+                        S_StopEnvSound(DUKE_JETPACK_IDLE,p->i);
+                        S_StopEnvSound(DUKE_JETPACK_ON,p->i);
                         P_DoQuote(53,p);
                     }
                 } else P_DoQuote(50,p);
@@ -2806,8 +2705,8 @@ int32_t A_CheckHitSprite(int32_t i, int16_t *hitsp) {
             sintable[(SA+512)&2047],
             sintable[SA&2047],
             0,&hitinfo,CLIPMASK1);
-
     SZ += zoff;
+
     *hitsp = hitinfo.hitsprite;
     if (hitinfo.hitwall >= 0 && (wall[hitinfo.hitwall].cstat&16) && A_CheckEnemySprite(&sprite[i]))
         return((1<<30));
@@ -2895,7 +2794,6 @@ void P_CheckSectors(int32_t snum) {
 
     if (!TEST_SYNC_KEY(g_player[snum].sync->bits, SK_OPEN) && !TEST_SYNC_KEY(g_player[snum].sync->bits, SK_ESCAPE))
         p->toggle_key_flag = 0;
-
     else if (!p->toggle_key_flag) {
 
         if (TEST_SYNC_KEY(g_player[snum].sync->bits, SK_ESCAPE)) {
@@ -3013,11 +2911,11 @@ void P_CheckSectors(int32_t snum) {
                 return;
 
             case NUKEBUTTON__STATIC:
-
                 hitawall(p,&j);
                 if (j >= 0 && wall[j].overpicnum == 0)
                     if (ActorExtra[neartagsprite].temp_data[0] == 0) {
-                        if (ud.noexits && ud.multimode > 1) {
+                        if (ud.noexits && (g_netServer || ud.multimode > 1)) {
+                            // NUKEBUTTON frags the player
                             ActorExtra[p->i].picnum = NUKEBUTTON;
                             ActorExtra[p->i].extra = 250;
                         } else {
@@ -3030,6 +2928,7 @@ void P_CheckSectors(int32_t snum) {
                         }
                     }
                 return;
+
             case WATERFOUNTAIN__STATIC:
                 if (ActorExtra[neartagsprite].temp_data[0] != 1) {
                     ActorExtra[neartagsprite].temp_data[0] = 1;
@@ -3041,6 +2940,7 @@ void P_CheckSectors(int32_t snum) {
                     }
                 }
                 return;
+
             case PLUG__STATIC:
                 A_PlaySound(SHORT_CIRCUIT,p->i);
                 sprite[p->i].extra -= 2+(krand()&3);
@@ -3049,6 +2949,7 @@ void P_CheckSectors(int32_t snum) {
                 p->pals[2] = 64;
                 p->pals_time = 32;
                 break;
+
             case VIEWSCREEN__STATIC:
             case VIEWSCREEN2__STATIC: {
                 i = headspritestat[STAT_ACTOR];
@@ -3056,7 +2957,7 @@ void P_CheckSectors(int32_t snum) {
                 while (i >= 0) {
                     if (PN == CAMERA1 && SP == 0 && sprite[neartagsprite].hitag == SLT) {
                         SP = 1; //Using this camera
-                        A_PlaySound(MONITOR_ACTIVE,neartagsprite);
+                        A_PlaySound(MONITOR_ACTIVE,p->i);
 
                         sprite[neartagsprite].owner = i;
                         sprite[neartagsprite].yvel = 1;
@@ -3078,9 +2979,7 @@ void P_CheckSectors(int32_t snum) {
 CLEARCAMERAS:
 
             if (i < 0) {
-                p->posx = p->oposx;
-                p->posy = p->oposy;
-                p->posz = p->oposz;
+                Bmemcpy(p, &p->oposx, sizeof(vec3_t));
                 p->ang = p->oang;
                 p->newowner = -1;
 
