@@ -1,0 +1,1 @@
+eRampage is a free open source port intended to run games from Redneck series. Those include Redneck Rampage, Suckin' Grits on Route 66, Redneck Rampage Rides Again and Redneck Deer Huntin'. See https://code.google.com/p/erampage/wiki/MainPage for details, help and credits.
