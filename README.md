@@ -3,7 +3,8 @@ Automatically exported from code.google.com/p/erampage
 
 #Introduction
 
-eRampage is a free open source port intended to run games from Redneck series. Those include Redneck Rampage, Suckin' Grits on Route 66, Redneck Rampage Rides Again and Redneck Deer Huntin'.
+/*eRampage is a free open source port intended to run games from Redneck series. Those include Redneck Rampage, Suckin' Grits on Route 66, Redneck Rampage Rides Again and Redneck Deer Huntin'.
+*/
 
 #Details
 
@@ -16,6 +17,7 @@ Here's what you need to download:
 ##Binary files
 
 This package contains Windows binaries, as well as some resources needed for the game. This is the only file required for Windows users. Un-pack it and proceed with installing game files. If you can't open the package, download 7-Zip archiver.
+// it contains data in form of binary no's
 
 Linux users will also need this file, as it contains resources needed for the game. (TODO: we really should do something so that the Linux users wouldn't have to download Windwoes binaries)
 
